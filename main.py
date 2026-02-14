@@ -2,6 +2,7 @@
 import os
 import json
 import webbrowser
+import threading
 from pathlib import Path
 import sys
 import io
@@ -28,6 +29,7 @@ from kivy.animation import Animation
 from kivy.clock import Clock
 from kivy.logger import Logger
 from kivy.utils import platform
+from functools import lru_cache
 
 # Kivy 한글 폰트 설정
 from kivy.core.text import LabelBase
@@ -36,39 +38,42 @@ from kivy.resources import resource_add_path
 # 안드로이드 환경 확인
 IS_ANDROID = platform == 'android'
 
-# 안드로이드 저장소 경로 설정
+# 안드로이드 저장소 경로 최적화
 if IS_ANDROID:
-    from android.storage import primary_external_storage_path
-    from android.permissions import request_permissions, Permission
-    
-    # 권한 요청
-    request_permissions([Permission.WRITE_EXTERNAL_STORAGE, Permission.READ_EXTERNAL_STORAGE])
-    
-    # 저장소 경로 설정
-    storage_path = primary_external_storage_path()
-    DATA_DIR = Path(storage_path) / 'sannaeeum'
+    try:
+        from android.storage import app_storage_path
+        from android.permissions import request_permissions, Permission
+        
+        # 권한 요청
+        request_permissions([Permission.WRITE_EXTERNAL_STORAGE, Permission.READ_EXTERNAL_STORAGE])
+        
+        # 앱 전용 저장소 사용 (안드로이드 11+ 호환성)
+        DATA_DIR = Path(app_storage_path()) / 'data'
+    except:
+        # 폴백: 외부 저장소
+        from android.storage import primary_external_storage_path
+        storage_path = primary_external_storage_path()
+        DATA_DIR = Path(storage_path) / 'sannaeeum'
 else:
-    DATA_DIR = Path.cwd()
+    DATA_DIR = Path.cwd() / 'data'
 
 # 데이터 디렉토리 생성
-DATA_DIR.mkdir(exist_ok=True)
+DATA_DIR.mkdir(exist_ok=True, parents=True)
 
 # ============================================================
 # 마루부리 폰트 설정
 # ============================================================
 FONT_NAME = 'MaruBuri'
-FONT_PATH = 'res/fonts/MaruBuri-Bold.ttf'  # 마루부리 볼드 폰트 경로
+FONT_PATH = 'res/fonts/MaruBuri-Bold.ttf'
 KOREAN_FONT_AVAILABLE = False
 
 # 폰트 등록 시도
 try:
     if os.path.exists(FONT_PATH):
-        # 폰트 파일이 있는 디렉토리를 리소스 경로에 추가
         font_dir = os.path.dirname(FONT_PATH)
         if font_dir:
             resource_add_path(font_dir)
         
-        # 폰트 등록 (파일명만 사용)
         font_file = os.path.basename(FONT_PATH)
         LabelBase.register(name=FONT_NAME, fn_regular=font_file)
         KOREAN_FONT_AVAILABLE = True
@@ -76,7 +81,6 @@ try:
     else:
         print(f"⚠️ 마루부리 폰트를 찾을 수 없습니다: {FONT_PATH}")
         
-        # 안드로이드 시스템 폰트 대체 시도
         if IS_ANDROID:
             system_fonts = [
                 '/system/fonts/NotoSansCJK-Regular.ttc',
@@ -94,7 +98,6 @@ except Exception as e:
     print(f"⚠️ 폰트 등록 실패: {e}")
     KOREAN_FONT_AVAILABLE = False
 
-# 폰트 사용 함수
 def get_font_name():
     """사용 가능한 폰트 이름 반환"""
     return FONT_NAME if KOREAN_FONT_AVAILABLE else None
@@ -173,7 +176,6 @@ class SimpleTitleLayout(BoxLayout):
         self.height = dp(80)
         self.padding = dp(10)
         self.spacing = dp(5)
-        self.background_color = hex_to_rgb(COLORS['primary'])
         
         with self.canvas.before:
             Color(*hex_to_rgb(COLORS['primary']))
@@ -362,7 +364,6 @@ class LinkCard(BoxLayout):
         self.add_widget(content_layout)
         self.add_widget(right_layout)
         
-        # 높이를 동적으로 계산
         self.bind(pos=self.update_rect, size=self.update_rect)
         Clock.schedule_once(self.calculate_height, 0.1)
     
@@ -403,12 +404,18 @@ class LinkCard(BoxLayout):
     
     def on_touch_down(self, touch):
         if len(self.children) > 0 and self.children[1].collide_point(*touch.pos):
-            try:
-                webbrowser.open(self.url)
-            except Exception as e:
-                Logger.error(f'LinkCard: URL 열기 실패: {e}')
+            self.open_url_safe(self.url)
             return True
         return super().on_touch_down(touch)
+    
+    def open_url_safe(self, url):
+        """비동기로 URL 열기 (UI 블로킹 방지)"""
+        def _open():
+            try:
+                webbrowser.open(url)
+            except Exception as e:
+                Logger.error(f'LinkCard: URL 열기 실패: {e}')
+        threading.Thread(target=_open).start()
 
 # ============================================================
 # 메인 앱 클래스
@@ -426,12 +433,33 @@ class LinkApp(BoxLayout):
         self.current_sort = 'title_asc'
         self.search_mode = False
         self.selected_category = 'all'
+        self._exit_pressed = False
         
-        self.load_links()
-        self.setup_ui()
-        self.refresh_link_list()
+        # 페이징 처리 (메모리 최적화)
+        self.current_page = 0
+        self.page_size = 20
+        
+        # 지연 초기화
+        Clock.schedule_once(self.load_links, 0.1)
+        Clock.schedule_once(self.setup_ui, 0.2)
+        Clock.schedule_once(self.refresh_link_list, 0.3)
     
-    def setup_ui(self):
+    def load_links(self, dt=None):
+        """데이터 로드"""
+        try:
+            if self.data_file.exists():
+                with open(self.data_file, 'r', encoding='utf-8') as f:
+                    loaded_links = json.load(f)
+                    for link in loaded_links:
+                        if 'category' not in link:
+                            link['category'] = '0'
+                    self.links = loaded_links
+        except Exception as e:
+            Logger.error(f'링크 로드 실패: {e}')
+            self.links = []
+    
+    def setup_ui(self, dt=None):
+        """UI 설정"""
         self.setup_promotion_buttons()
         
         title_layout = SimpleTitleLayout()
@@ -454,15 +482,24 @@ class LinkApp(BoxLayout):
         )
         
         left_promo_btn = SimplePromotionButton(text='산내음청결고춧가루')
-        left_promo_btn.bind(on_press=lambda x: webbrowser.open('https://naver.me/5NqKupAN'))
+        left_promo_btn.bind(on_press=lambda x: self.open_url_safe('https://naver.me/5NqKupAN'))
         
         right_promo_btn = SimplePromotionButton(text='풀밭청결고춧가루')
-        right_promo_btn.bind(on_press=lambda x: webbrowser.open('https://naver.me/xaf7s1s5'))
+        right_promo_btn.bind(on_press=lambda x: self.open_url_safe('https://naver.me/xaf7s1s5'))
         
         promotion_layout.add_widget(left_promo_btn)
         promotion_layout.add_widget(right_promo_btn)
         
         self.add_widget(promotion_layout)
+    
+    def open_url_safe(self, url):
+        """비동기로 URL 열기"""
+        def _open():
+            try:
+                webbrowser.open(url)
+            except Exception as e:
+                Logger.error(f'URL 열기 실패: {e}')
+        threading.Thread(target=_open).start()
     
     def setup_search_sort_ui(self):
         font_name = get_font_name()
@@ -611,7 +648,8 @@ class LinkApp(BoxLayout):
         self.scroll.add_widget(self.link_layout)
         self.add_widget(self.scroll)
     
-    def refresh_link_list(self):
+    def refresh_link_list(self, dt=None):
+        """링크 목록 새로고침 (페이징 적용)"""
         font_name = get_font_name()
         
         self.link_layout.clear_widgets()
@@ -636,8 +674,13 @@ class LinkApp(BoxLayout):
             self.link_layout.add_widget(empty_label)
             self.link_layout.height += dp(100)
         else:
-            for i, link in enumerate(links_to_display):
-                original_index = self.links.index(link) if link in self.links else i
+            # 페이징 처리
+            start = self.current_page * self.page_size
+            end = min(start + self.page_size, len(links_to_display))
+            page_links = links_to_display[start:end]
+            
+            for i, link in enumerate(page_links):
+                original_index = self.links.index(link) if link in self.links else (start + i)
                 card = LinkCard(
                     link['title'], 
                     link['description'], 
@@ -649,8 +692,26 @@ class LinkApp(BoxLayout):
                 )
                 self.link_layout.add_widget(card)
                 Clock.schedule_once(lambda dt, c=card: self.update_card_height(c), 0.2)
+            
+            # 더 보기 버튼 (링크가 더 있을 경우)
+            if end < len(links_to_display):
+                more_btn = Button(
+                    text='더 보기...',
+                    size_hint_y=None,
+                    height=dp(50),
+                    background_color=hex_to_rgb(COLORS['primary_light']),
+                    font_name=font_name
+                )
+                more_btn.bind(on_press=self.load_more)
+                self.link_layout.add_widget(more_btn)
+                self.link_layout.height += dp(50)
         
         Clock.schedule_once(lambda dt: setattr(self.scroll, 'scroll_y', 1), 0.1)
+    
+    def load_more(self, instance):
+        """더 많은 링크 로드"""
+        self.current_page += 1
+        self.refresh_link_list()
     
     def update_card_height(self, card):
         """카드 높이를 링크 레이아웃에 반영"""
@@ -740,6 +801,7 @@ class LinkApp(BoxLayout):
     
     def search_links(self, instance):
         search_text = self.search_input.text.strip()
+        self.current_page = 0  # 검색 시 첫 페이지부터
         
         try:
             if search_text:
@@ -774,11 +836,13 @@ class LinkApp(BoxLayout):
         self.selected_category = 'all'
         self.category_btn.text = '전체포함'
         self.search_mode = False
+        self.current_page = 0
         self.refresh_link_list()
     
     def sort_links(self, sort_type):
         self.current_sort = sort_type
         links_to_sort = self.displayed_links if self.search_mode else self.links
+        self.current_page = 0  # 정렬 시 첫 페이지부터
         
         if sort_type == 'title_asc':
             links_to_sort.sort(key=lambda x: x['title'].lower())
@@ -1398,24 +1462,40 @@ class LinkApp(BoxLayout):
         self.save_links()
         self.refresh_link_list()
     
-    def load_links(self):
-        try:
-            if self.data_file.exists():
-                with open(self.data_file, 'r', encoding='utf-8') as f:
-                    loaded_links = json.load(f)
-                    for link in loaded_links:
-                        if 'category' not in link:
-                            link['category'] = '0'
-                    self.links = loaded_links
-        except:
-            self.links = []
-    
     def save_links(self):
         try:
             with open(self.data_file, 'w', encoding='utf-8') as f:
                 json.dump(self.links, f, ensure_ascii=False, indent=2)
-        except:
-            pass
+        except Exception as e:
+            Logger.error(f'링크 저장 실패: {e}')
+    
+    def confirm_exit(self):
+        """뒤로가기 두 번 누르면 종료"""
+        if self._exit_pressed:
+            App.get_running_app().stop()
+        else:
+            self._exit_pressed = True
+            self.show_toast('한 번 더 누르면 종료됩니다')
+            Clock.schedule_once(lambda dt: setattr(self, '_exit_pressed', False), 2)
+    
+    def show_toast(self, message):
+        """간단한 토스트 메시지"""
+        content = BoxLayout(orientation='vertical', padding=dp(20))
+        content.add_widget(Label(
+            text=message,
+            color=hex_to_rgb(COLORS['white']),
+            font_size=dp(16),
+            font_name=get_font_name()
+        ))
+        
+        popup = Popup(
+            content=content,
+            size_hint=(0.5, 0.2),
+            background_color=hex_to_rgb(COLORS['primary_dark']),
+            auto_dismiss=True
+        )
+        popup.open()
+        Clock.schedule_once(lambda dt: popup.dismiss(), 1.5)
 
 # ============================================================
 # 앱 실행
@@ -1425,9 +1505,19 @@ class SannaeeumLinkApp(App):
     def build(self):
         Window.clearcolor = hex_to_rgb(COLORS['background'])
         self.title = '산내음 링크'
-        # 아이콘 설정 - res/drawable/icon.png 사용
         self.icon = 'icon.png'
+        
+        # 뒤로가기 버튼 바인딩
+        Window.bind(on_keyboard=self.on_keyboard)
+        
         return LinkApp()
+    
+    def on_keyboard(self, window, key, scancode, codepoint, modifier):
+        if key == 27:  # 뒤로가기 버튼
+            if hasattr(self.root, 'confirm_exit'):
+                self.root.confirm_exit()
+            return True
+        return False
 
 if __name__ == '__main__':
     print("산내음 링크 앱 시작 중...")
