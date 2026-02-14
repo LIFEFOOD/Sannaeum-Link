@@ -13,10 +13,10 @@ jobs:
     
     steps:
     - name: Checkout code
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4  # v3 → v4로 업데이트 (선택사항)
 
     - name: Set up Python
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v5  # v4 → v5로 업데이트 (선택사항)
       with:
         python-version: '3.9'
 
@@ -101,11 +101,11 @@ jobs:
         PATH: ${{ env.PATH }}
 
     - name: Upload APK artifact
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4  # 🟢 v3 → v4로 변경 (핵심 수정)
       with:
         name: sannaeeum-link-apk
         path: bin/*.apk
-        if-no-files-found: error
+        if-no-files-found: error  # v4에서 추가된 옵션 (파일이 없으면 에러 처리)
 
     - name: Get APK file name
       id: apk
@@ -116,7 +116,7 @@ jobs:
 
     - name: Create Release
       if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
-      uses: softprops/action-gh-release@v1
+      uses: softprops/action-gh-release@v2  # v1 → v2로 업데이트 (선택사항)
       with:
         name: Release ${{ github.sha }}
         tag_name: v${{ github.run_number }}
