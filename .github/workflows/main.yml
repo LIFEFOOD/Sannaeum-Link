@@ -5,7 +5,7 @@ on:
     branches: [ main, master ]
   pull_request:
     branches: [ main, master ]
-  workflow_dispatch:  # 수동 실행 가능
+  workflow_dispatch:
 
 jobs:
   build:
@@ -13,10 +13,10 @@ jobs:
     
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4  # v3 → v4로 업데이트 (선택사항)
+      uses: actions/checkout@v4
 
     - name: Set up Python
-      uses: actions/setup-python@v5  # v4 → v5로 업데이트 (선택사항)
+      uses: actions/setup-python@v5
       with:
         python-version: '3.9'
 
@@ -24,7 +24,7 @@ jobs:
       run: |
         sudo apt update
         sudo apt install -y \
-          git \
+          git \                       # 🟢 Git 명시적 설치
           wget \
           unzip \
           zip \
@@ -43,6 +43,11 @@ jobs:
           pkg-config \
           zlib1g-dev
 
+    - name: Verify Git installation
+      run: |
+        git --version  # 🟢 Git 설치 확인
+        which git       # 🟢 Git 경로 확인
+
     - name: Install Cython and buildozer
       run: |
         pip install --upgrade pip
@@ -51,7 +56,6 @@ jobs:
 
     - name: Install Android SDK dependencies
       run: |
-        # Install Android SDK command line tools
         mkdir -p $HOME/android-sdk/cmdline-tools
         cd $HOME/android-sdk/cmdline-tools
         wget https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip
@@ -59,8 +63,6 @@ jobs:
         mv cmdline-tools latest
         echo "ANDROID_HOME=$HOME/android-sdk" >> $GITHUB_ENV
         echo "$HOME/android-sdk/cmdline-tools/latest/bin" >> $GITHUB_PATH
-        
-        # Accept licenses
         yes | $HOME/android-sdk/cmdline-tools/latest/bin/sdkmanager --licenses || true
 
     - name: Setup Android SDK
@@ -87,7 +89,6 @@ jobs:
     - name: Create placeholder icon if not exists
       run: |
         if [ ! -f res/drawable/icon.png ]; then
-          # Create a simple placeholder icon (requires imagemagick)
           sudo apt install -y imagemagick
           convert -size 512x512 xc:purple -fill white -gravity center -pointsize 72 -draw "text 0,0 '산내음'" res/drawable/icon.png || \
           touch res/drawable/icon.png
@@ -101,11 +102,11 @@ jobs:
         PATH: ${{ env.PATH }}
 
     - name: Upload APK artifact
-      uses: actions/upload-artifact@v4  # 🟢 v3 → v4로 변경 (핵심 수정)
+      uses: actions/upload-artifact@v4
       with:
         name: sannaeeum-link-apk
         path: bin/*.apk
-        if-no-files-found: error  # v4에서 추가된 옵션 (파일이 없으면 에러 처리)
+        if-no-files-found: error
 
     - name: Get APK file name
       id: apk
@@ -116,7 +117,7 @@ jobs:
 
     - name: Create Release
       if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
-      uses: softprops/action-gh-release@v2  # v1 → v2로 업데이트 (선택사항)
+      uses: softprops/action-gh-release@v2
       with:
         name: Release ${{ github.sha }}
         tag_name: v${{ github.run_number }}
