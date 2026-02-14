@@ -7,9 +7,18 @@ from pathlib import Path
 import sys
 import io
 
-# 한글 인코딩 설정
-sys.stdout = io.TextIOWrapper(sys.stdout.detach(), encoding='utf-8')
-sys.stderr = io.TextIOWrapper(sys.stderr.detach(), encoding='utf-8')
+# Kivy 설정
+from kivy.config import Config
+Config.set('graphics', 'width', '400')
+Config.set('graphics', 'height', '700')
+Config.set('graphics', 'resizable', False)  # 크기 고정
+
+# 한글 인코딩 설정 - 오류 무시
+try:
+    sys.stdout = io.TextIOWrapper(sys.stdout.detach(), encoding='utf-8')
+    sys.stderr = io.TextIOWrapper(sys.stderr.detach(), encoding='utf-8')
+except:
+    pass  # 컴퓨터 IDLE 등에서는 무시
 
 # 나머지 임포트
 import kivy
@@ -531,7 +540,7 @@ class LinkApp(BoxLayout):
         search_btn.bind(on_press=self.search_links)
         
         clear_btn = Button(
-            text='전체표시',
+            text='전체',
             size_hint=(0.1, 1),
             background_color=hex_to_rgb(COLORS['accent']),
             font_name=font_name
