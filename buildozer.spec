@@ -179,8 +179,12 @@ android.debug = True
 # (bool) Enable AndroidX support
 #android.use_androidx = True
 
-# (list) Gradle dependencies to add
-android.gradle_dependencies = 'androidx.core:core:1.7.0'
+# android.gradle_dependencies = 'androidx.core:core:1.7.0'  ← 주석 처리
+android.gradle_dependencies =
+
+# Gradle 데몬 메모리 설정
+android.gradle_options = -Xmx1024M
+
 
 # (str) The name of the bundle (aab file)
 #android.bundle_name = sannaeeumlink
@@ -393,3 +397,4 @@ warn_on_root = 1
 
 # (str) Path to the android NDK standalone toolchain directory
 #android_ndk_standalone_dir = ~/.buildozer/android/platform/android-ndk-r25b/toolchains
+
