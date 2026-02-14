@@ -20,11 +20,30 @@ jobs:
       with:
         python-version: '3.9'
 
-    - name: Install system dependencies
+    - name: Update package lists
       run: |
         sudo apt update
+        sudo apt upgrade -y
+
+    - name: Install Git
+      run: |
+        sudo apt install -y git
+        git --version
+        which git
+
+    - name: Verify Git installation
+      run: |
+        if ! command -v git &> /dev/null; then
+          echo "Git could not be found"
+          exit 1
+        else
+          echo "Git is installed at $(which git)"
+          git --version
+        fi
+
+    - name: Install other system dependencies
+      run: |
         sudo apt install -y \
-          git \
           wget \
           unzip \
           zip \
@@ -42,11 +61,6 @@ jobs:
           libtool \
           pkg-config \
           zlib1g-dev
-
-    - name: Verify Git installation
-      run: |
-        git --version  # 🟢 Git 설치 확인
-        which git       # 🟢 Git 경로 확인
 
     - name: Install Cython and buildozer
       run: |
