@@ -7,11 +7,13 @@ from pathlib import Path
 import sys
 import io
 
-# Kivy 설정
+# Kivy 설정 - 로딩 메시지 제거를 위해 추가
 from kivy.config import Config
 Config.set('graphics', 'width', '400')
 Config.set('graphics', 'height', '700')
 Config.set('graphics', 'resizable', False)  # 크기 고정
+Config.set('kivy', 'show_loadingscreen', '0')  # 로딩 화면 비활성화
+Config.set('kivy', 'loading_image', '')  # 로딩 이미지 제거
 
 # 한글 인코딩 설정 - 오류 무시
 try:
@@ -161,11 +163,62 @@ def hex_to_rgb(hex_color, alpha=1.0):
     return (1, 1, 1, 1)
 
 # ============================================================
-# 커스텀 위젯 클래스들
+# 키보드 인식 스크롤 가능한 팝업 클래스
+# ============================================================
+
+class ScrollablePopup(Popup):
+    """키보드가 나타날 때 자동으로 스크롤되는 팝업 (상단 정렬)"""
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.keyboard_height = 0
+        self.active_input = None
+        self.content_scroll = None
+        
+        # 팝업을 화면 상단에 배치
+        self.pos_hint = {'top': 0.9}  # 화면 상단에서 10% 아래로
+        
+        # 키보드 높이 변경 이벤트 바인딩
+        Window.bind(on_keyboard_height=self.on_keyboard_height)
+    
+    def on_keyboard_height(self, window, height):
+        """키보드 높이 변경 시 호출"""
+        self.keyboard_height = height
+        if self.content_scroll and self.active_input:
+            # 키보드가 올라오면 활성화된 입력창으로 스크롤
+            Clock.schedule_once(lambda dt: self.scroll_to_active_input(), 0.1)
+    
+    def scroll_to_active_input(self):
+        """활성화된 입력창으로 스크롤"""
+        if not self.content_scroll or not self.active_input:
+            return
+        
+        # 입력창의 위치 계산
+        input_y = self.active_input.to_window(0, self.active_input.y)[1]
+        popup_y = self.to_window(0, self.y)[1]
+        
+        # 키보드 높이를 고려한 스크롤 위치 계산
+        if self.keyboard_height > 0:
+            # 키보드 위로 입력창이 보이도록 스크롤
+            target_scroll = (input_y - popup_y - self.keyboard_height) / max(1, self.content_scroll.height - self.content_scroll.height)
+            self.content_scroll.scroll_y = max(0, min(1, target_scroll))
+    
+    def on_input_focus(self, instance, value):
+        """입력창 포커스 변경 시 호출"""
+        if value:
+            self.active_input = instance
+            self.scroll_to_active_input()
+    
+    def dismiss(self):
+        """팝업 닫을 때 이벤트 제거"""
+        Window.unbind(on_keyboard_height=self.on_keyboard_height)
+        super().dismiss()
+
+# ============================================================
+# 커스텀 위젯 클래스들 - 수정됨
 # ============================================================
 
 class SimplePromotionButton(Button):
-    def __init__(self, **kwargs):
+    def __init__(self, text, **kwargs):
         super().__init__(**kwargs)
         self.background_normal = ''
         self.background_color = hex_to_rgb(COLORS['pink'])
@@ -174,7 +227,12 @@ class SimplePromotionButton(Button):
         self.height = dp(55)
         self.font_size = dp(20)
         self.bold = True
-        self.padding = [dp(15), dp(10)]
+        self.text = text
+        
+        # 두 버튼 모두 0.5로 동일하게 설정
+        self.size_hint_x = 0.5
+            
+        self.padding = [dp(20), dp(10)]
         self.font_name = get_font_name()
 
 class SimpleTitleLayout(BoxLayout):
@@ -184,7 +242,7 @@ class SimpleTitleLayout(BoxLayout):
         self.size_hint_y = None
         self.height = dp(80)
         self.padding = dp(10)
-        self.spacing = dp(5)
+        self.spacing = dp(15)  # 세로 간격 15로 통일
         
         with self.canvas.before:
             Color(*hex_to_rgb(COLORS['primary']))
@@ -217,6 +275,8 @@ class PurpleButton(Button):
         self.height = dp(50)
         self.font_size = dp(16)
         self.bold = True
+        self.size_hint_x = 1.0
+        self.padding = [dp(15), dp(10)]
         self.font_name = get_font_name()
 
 class SmallButton(Button):
@@ -224,8 +284,8 @@ class SmallButton(Button):
         super().__init__(**kwargs)
         self.background_normal = ''
         self.size_hint = (None, None)
-        self.size = (dp(40), dp(40))
-        self.font_size = dp(12)
+        self.size = (dp(45), dp(45))
+        self.font_size = dp(14)
         self.color = hex_to_rgb(COLORS['white'])
         
         if color_type == 'danger':
@@ -247,8 +307,8 @@ class CategoryToggleButton(ToggleButton):
         self.background_color_down = hex_to_rgb(COLORS['primary'])
         self.color = hex_to_rgb(COLORS['text_primary'])
         self.size_hint_y = None
-        self.height = dp(30)
-        self.font_size = dp(12)
+        self.height = dp(35)
+        self.font_size = dp(13)
         self.group = 'categories'
         self.font_name = get_font_name()
 
@@ -356,7 +416,7 @@ class LinkCard(BoxLayout):
         category_label.bind(pos=self.update_category_bg, size=self.update_category_bg)
         
         # 버튼 레이아웃
-        button_layout = BoxLayout(orientation='horizontal', size_hint_y=None, height=dp(40), spacing=dp(5))
+        button_layout = BoxLayout(orientation='horizontal', size_hint_y=None, height=dp(45), spacing=dp(5))
         
         edit_btn = SmallButton(color_type='warning', text='✎')
         edit_btn.bind(on_press=self.edit_link)
@@ -427,22 +487,21 @@ class LinkCard(BoxLayout):
         threading.Thread(target=_open).start()
 
 # ============================================================
-# 메인 앱 클래스
+# 메인 앱 클래스 - 검색란 줄 수정
 # ============================================================
 
 class LinkApp(BoxLayout):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.orientation = 'vertical'
-        self.padding = dp(20)
-        self.spacing = dp(20)
+        self.padding = dp(15)
+        self.spacing = dp(15)  # 모든 세로 간격 15로 통일
         self.links = []
         self.displayed_links = []
         self.data_file = DATA_DIR / 'links.json'
         self.current_sort = 'title_asc'
         self.search_mode = False
         self.selected_category = 'all'
-        self._exit_pressed = False
         
         # 페이징 처리 (메모리 최적화)
         self.current_page = 0
@@ -486,8 +545,8 @@ class LinkApp(BoxLayout):
         promotion_layout = BoxLayout(
             size_hint_y=None, 
             height=dp(60),
-            spacing=dp(10),
-            padding=[dp(5), dp(5), dp(5), dp(5)]
+            spacing=dp(6),  # 버튼 사이 간격 6으로 설정
+            padding=[dp(0), dp(5), dp(0), dp(5)]
         )
         
         left_promo_btn = SimplePromotionButton(text='산내음청결고춧가루')
@@ -513,35 +572,47 @@ class LinkApp(BoxLayout):
     def setup_search_sort_ui(self):
         font_name = get_font_name()
         
-        search_category_layout = BoxLayout(size_hint_y=None, height=dp(50), spacing=dp(10))
+        # 검색/카테고리 줄 - 픽셀 기준으로 재계산
+        # 검색 입력란: 183px (49.4%)
+        # 전체포함: 68px (18.4%)
+        # 검색: 50px (13.5%)
+        # 전체: 50px (13.5%)
+        # 여백: 6px x 3 = 18px
+        # 합계: 369px (370px 기준 1px 여유)
         
+        search_category_layout = BoxLayout(size_hint_y=None, height=dp(50), spacing=dp(6))
+        
+        # 검색 입력란 - 183px (49.4%)
         self.search_input = TextInput(
             hint_text='검색어 (OR, AND, NOT 사용 가능, 예: 바람 OR 김)',
-            size_hint=(0.5, 1),
+            size_hint=(0.494, 1),  # 183/370 = 0.494
             background_color=hex_to_rgb(COLORS['white']),
             foreground_color=hex_to_rgb(COLORS['text_primary']),
             font_name=font_name
         )
         
+        # 전체포함 버튼 - 68px (18.4%)
         self.category_btn = Button(
             text='전체포함',
-            size_hint=(0.15, 1),
+            size_hint=(0.184, 1),  # 68/370 = 0.184
             background_color=hex_to_rgb(COLORS['primary_light']),
             font_name=font_name
         )
         self.category_btn.bind(on_press=self.show_category_popup)
         
+        # 검색 버튼 - 50px (13.5%)
         search_btn = Button(
             text='검색',
-            size_hint=(0.1, 1),
+            size_hint=(0.135, 1),  # 50/370 = 0.135
             background_color=hex_to_rgb(COLORS['primary']),
             font_name=font_name
         )
         search_btn.bind(on_press=self.search_links)
         
+        # 전체 버튼 - 50px (13.5%)
         clear_btn = Button(
             text='전체',
-            size_hint=(0.1, 1),
+            size_hint=(0.135, 1),  # 50/370 = 0.135
             background_color=hex_to_rgb(COLORS['accent']),
             font_name=font_name
         )
@@ -552,7 +623,8 @@ class LinkApp(BoxLayout):
         search_category_layout.add_widget(search_btn)
         search_category_layout.add_widget(clear_btn)
         
-        sort_layout = BoxLayout(size_hint_y=None, height=dp(50), spacing=dp(5))
+        # 제목 버튼 줄 - 기존 유지 (모두 25% = 88px, 여백 6px)
+        sort_layout = BoxLayout(size_hint_y=None, height=dp(50), spacing=dp(6))
         
         sort_buttons = [
             ('제목↑', 'title_asc'),
@@ -564,7 +636,7 @@ class LinkApp(BoxLayout):
         for text, sort_type in sort_buttons:
             btn = Button(
                 text=text,
-                size_hint=(0.25, 1),
+                size_hint=(0.25, 1),  # 88px (25%)
                 background_color=hex_to_rgb(COLORS['primary_light']),
                 font_name=font_name
             )
@@ -649,7 +721,7 @@ class LinkApp(BoxLayout):
         self.link_layout = GridLayout(
             cols=1,
             size_hint_y=None,
-            spacing=dp(15),
+            spacing=dp(15),  # 링크 카드 사이 간격 15 유지
             padding=dp(10)
         )
         self.link_layout.bind(minimum_height=self.link_layout.setter('height'))
@@ -988,31 +1060,44 @@ class LinkApp(BoxLayout):
     def show_add_link_popup(self, instance):
         font_name = get_font_name()
         
-        content = BoxLayout(orientation='vertical', spacing=dp(15), padding=dp(20))
+        # 스크롤 가능한 컨텐츠 레이아웃
+        scroll_content = ScrollView(do_scroll_x=False)
+        content = BoxLayout(orientation='vertical', spacing=dp(8), padding=[dp(15), dp(10), dp(15), dp(10)], size_hint_y=None)
+        content.bind(minimum_height=content.setter('height'))
         
+        # 제목 입력
         self.title_input = TextInput(
             hint_text='사이트 제목을 입력하세요',
             size_hint_y=None,
             height=dp(50),
             font_name=font_name
         )
+        self.title_input.bind(focus=self.on_input_focus)
+        content.add_widget(self.title_input)
         
+        # 설명 입력
         self.desc_input = TextInput(
             hint_text='사이트 설명을 입력하세요\n(여러 줄로 입력 가능)',
             size_hint_y=None,
-            height=dp(100),
+            height=dp(80),
             multiline=True,
             font_name=font_name
         )
+        self.desc_input.bind(focus=self.on_input_focus)
+        content.add_widget(self.desc_input)
         
+        # URL 입력
         self.url_input = TextInput(
             hint_text='https://example.com',
             size_hint_y=None,
             height=dp(50),
             font_name=font_name
         )
+        self.url_input.bind(focus=self.on_input_focus)
+        content.add_widget(self.url_input)
         
-        button_category_layout = BoxLayout(spacing=dp(10), size_hint_y=None, height=dp(50))
+        # 버튼과 카테고리 선택 레이아웃
+        button_category_layout = BoxLayout(spacing=dp(8), size_hint_y=None, height=dp(48))
         
         cancel_btn = Button(
             text='취소', 
@@ -1039,6 +1124,7 @@ class LinkApp(BoxLayout):
         button_category_layout.add_widget(cancel_btn)
         button_category_layout.add_widget(self.category_select_btn)
         button_category_layout.add_widget(save_btn)
+        content.add_widget(button_category_layout)
         
         self.selected_category_id = '0'
         
@@ -1063,29 +1149,31 @@ class LinkApp(BoxLayout):
         save_btn.bind(on_press=save_link)
         cancel_btn.bind(on_press=close_popup)
         
-        content.add_widget(Label(
-            text='새 링크 추가', 
-            color=hex_to_rgb(COLORS['white']),
-            font_size=dp(18),
-            bold=True,
-            size_hint_y=None,
-            height=dp(40),
-            font_name=font_name
-        ))
-        content.add_widget(self.title_input)
-        content.add_widget(self.desc_input)
-        content.add_widget(self.url_input)
-        content.add_widget(button_category_layout)
+        scroll_content.add_widget(content)
         
-        popup = Popup(
+        # 스크롤 가능한 팝업 생성 - 적절한 높이로 설정
+        popup = ScrollablePopup(
             title='',
-            content=content,
-            size_hint=(0.85, 0.8),
+            content=scroll_content,
+            size_hint=(0.9, 0.55),  # 화면의 55% 높이
             auto_dismiss=False
         )
         
+        # 팝업에 스크롤 뷰와 입력창 참조 저장
+        popup.content_scroll = scroll_content
+        popup.active_input = None
+        popup.on_input_focus = self.on_input_focus
+        
         popup.open()
         Clock.schedule_once(lambda dt: setattr(self.title_input, 'focus', True), 0.1)
+    
+    def on_input_focus(self, instance, value):
+        """입력창 포커스 변경 시 팝업에 알림"""
+        # 현재 열려있는 팝업 찾기
+        for child in self.children:
+            if isinstance(child, ScrollablePopup):
+                child.on_input_focus(instance, value)
+                break
     
     def show_add_category_popup(self, instance):
         content = BoxLayout(orientation='vertical', spacing=dp(10), padding=dp(15))
@@ -1147,31 +1235,44 @@ class LinkApp(BoxLayout):
         link = self.links[index]
         font_name = get_font_name()
         
-        content = BoxLayout(orientation='vertical', spacing=dp(15), padding=dp(20))
+        # 스크롤 가능한 컨텐츠 레이아웃
+        scroll_content = ScrollView(do_scroll_x=False)
+        content = BoxLayout(orientation='vertical', spacing=dp(8), padding=[dp(15), dp(10), dp(15), dp(10)], size_hint_y=None)
+        content.bind(minimum_height=content.setter('height'))
         
+        # 제목 입력
         title_input = TextInput(
             text=link['title'],
             size_hint_y=None,
             height=dp(50),
             font_name=font_name
         )
+        title_input.bind(focus=self.on_input_focus)
+        content.add_widget(title_input)
         
+        # 설명 입력
         desc_input = TextInput(
             text=link['description'],
             size_hint_y=None,
-            height=dp(100),
+            height=dp(80),
             multiline=True,
             font_name=font_name
         )
+        desc_input.bind(focus=self.on_input_focus)
+        content.add_widget(desc_input)
         
+        # URL 입력
         url_input = TextInput(
             text=link['url'],
             size_hint_y=None,
             height=dp(50),
             font_name=font_name
         )
+        url_input.bind(focus=self.on_input_focus)
+        content.add_widget(url_input)
         
-        button_category_layout = BoxLayout(spacing=dp(10), size_hint_y=None, height=dp(50))
+        # 버튼과 카테고리 선택 레이아웃
+        button_category_layout = BoxLayout(spacing=dp(8), size_hint_y=None, height=dp(48))
         
         cancel_btn = Button(
             text='취소', 
@@ -1198,6 +1299,7 @@ class LinkApp(BoxLayout):
         button_category_layout.add_widget(cancel_btn)
         button_category_layout.add_widget(category_select_btn)
         button_category_layout.add_widget(save_btn)
+        content.add_widget(button_category_layout)
         
         edit_selected_category = current_category
         
@@ -1283,26 +1385,20 @@ class LinkApp(BoxLayout):
         save_btn.bind(on_press=save_edit)
         cancel_btn.bind(on_press=cancel_edit)
         
-        content.add_widget(Label(
-            text='링크 수정', 
-            color=hex_to_rgb(COLORS['text_primary']),
-            font_size=dp(18),
-            bold=True,
-            size_hint_y=None,
-            height=dp(40),
-            font_name=font_name
-        ))
-        content.add_widget(title_input)
-        content.add_widget(desc_input)
-        content.add_widget(url_input)
-        content.add_widget(button_category_layout)
+        scroll_content.add_widget(content)
         
-        popup = Popup(
+        # 스크롤 가능한 팝업 생성 - 적절한 높이로 설정
+        popup = ScrollablePopup(
             title='',
-            content=content,
-            size_hint=(0.85, 0.8),
+            content=scroll_content,
+            size_hint=(0.9, 0.55),  # 화면의 55% 높이
             auto_dismiss=False
         )
+        
+        # 팝업에 스크롤 뷰와 입력창 참조 저장
+        popup.content_scroll = scroll_content
+        popup.active_input = None
+        popup.on_input_focus = self.on_input_focus
         
         popup.open()
         Clock.schedule_once(lambda dt: setattr(title_input, 'focus', True), 0.1)
@@ -1477,34 +1573,6 @@ class LinkApp(BoxLayout):
                 json.dump(self.links, f, ensure_ascii=False, indent=2)
         except Exception as e:
             Logger.error(f'링크 저장 실패: {e}')
-    
-    def confirm_exit(self):
-        """뒤로가기 두 번 누르면 종료"""
-        if self._exit_pressed:
-            App.get_running_app().stop()
-        else:
-            self._exit_pressed = True
-            self.show_toast('한 번 더 누르면 종료됩니다')
-            Clock.schedule_once(lambda dt: setattr(self, '_exit_pressed', False), 2)
-    
-    def show_toast(self, message):
-        """간단한 토스트 메시지"""
-        content = BoxLayout(orientation='vertical', padding=dp(20))
-        content.add_widget(Label(
-            text=message,
-            color=hex_to_rgb(COLORS['white']),
-            font_size=dp(16),
-            font_name=get_font_name()
-        ))
-        
-        popup = Popup(
-            content=content,
-            size_hint=(0.5, 0.2),
-            background_color=hex_to_rgb(COLORS['primary_dark']),
-            auto_dismiss=True
-        )
-        popup.open()
-        Clock.schedule_once(lambda dt: popup.dismiss(), 1.5)
 
 # ============================================================
 # 앱 실행
@@ -1523,8 +1591,7 @@ class SannaeeumLinkApp(App):
     
     def on_keyboard(self, window, key, scancode, codepoint, modifier):
         if key == 27:  # 뒤로가기 버튼
-            if hasattr(self.root, 'confirm_exit'):
-                self.root.confirm_exit()
+            self.stop()
             return True
         return False
 
