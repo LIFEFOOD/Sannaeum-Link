@@ -24,7 +24,7 @@ jobs:
       run: |
         sudo apt update
         sudo apt install -y \
-          git \                       # 🟢 Git 명시적 설치
+          git \
           wget \
           unzip \
           zip \
