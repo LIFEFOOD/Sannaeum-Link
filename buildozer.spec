@@ -6,9 +6,15 @@ package.domain = org.sannaeeum
 source.dir = .
 source.include_exts = py,png,jpg,kv,ttf
 
+# 🔧 수정: version과 version.regex 중 하나만 사용
+# 방법 1: 고정 버전 사용 (간단함)
 version = 0.1
-version.regex = __version__ = ['"](.*)['"]
-version.filename = %(source.dir)s/main.py
+# version.regex = __version__ = ['"](.*)['"]
+# version.filename = %(source.dir)s/main.py
+
+# 방법 2: 정규식으로 버전 추출 (아래 두 줄 주석 해제하고 위 version 줄 주석 처리)
+# version.regex = __version__ = ['"](.*)['"]
+# version.filename = %(source.dir)s/main.py
 
 requirements = python3,kivy,android
 
