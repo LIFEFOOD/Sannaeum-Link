@@ -20,47 +20,10 @@ jobs:
       with:
         python-version: '3.9'
 
-    - name: Update package lists
+    - name: Install system dependencies
       run: |
         sudo apt update
-        sudo apt upgrade -y
-
-    - name: Install Git
-      run: |
-        sudo apt install -y git
-        git --version
-        which git
-
-    - name: Verify Git installation
-      run: |
-        if ! command -v git &> /dev/null; then
-          echo "Git could not be found"
-          exit 1
-        else
-          echo "Git is installed at $(which git)"
-          git --version
-        fi
-
-    - name: Install other system dependencies
-      run: |
-        sudo apt install -y \
-          wget \
-          unzip \
-          zip \
-          openjdk-17-jdk \
-          python3-pip \
-          python3-setuptools \
-          python3-dev \
-          libltdl-dev \
-          libffi-dev \
-          libssl-dev \
-          autoconf \
-          automake \
-          cmake \
-          ccache \
-          libtool \
-          pkg-config \
-          zlib1g-dev
+        sudo apt install -y git wget unzip zip openjdk-17-jdk python3-pip python3-setuptools python3-dev libltdl-dev libffi-dev libssl-dev autoconf automake cmake ccache libtool pkg-config zlib1gg
 
     - name: Install Cython and buildozer
       run: |
@@ -72,48 +35,20 @@ jobs:
       run: |
         mkdir -p $HOME/android-sdk/cmdline-tools
         cd $HOME/android-sdk/cmdline-tools
-        wget https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip
+        wget -q https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip
         unzip -q commandlinetools-linux-9477386_latest.zip
         mv cmdline-tools latest
         echo "ANDROID_HOME=$HOME/android-sdk" >> $GITHUB_ENV
         echo "$HOME/android-sdk/cmdline-tools/latest/bin" >> $GITHUB_PATH
-        yes | $HOME/android-sdk/cmdline-tools/latest/bin/sdkmanager --licenses || true
+        yes | $HOME/android-sdk/cmdline-tools/latest/bin/sdkmanager --licenses > /dev/null 2>&1 || true
 
     - name: Setup Android SDK
       run: |
-        $HOME/android-sdk/cmdline-tools/latest/bin/sdkmanager "platform-tools" "platforms;android-33" "build-tools;33.0.2"
-
-    - name: Create buildozer.spec if not exists
-      run: |
-        if [ ! -f buildozer.spec ]; then
-          buildozer init
-        fi
-
-    - name: Ensure font directory exists
-      run: |
-        mkdir -p res/fonts
-        mkdir -p res/drawable
-
-    - name: Download MaruBuri font (if not exists)
-      run: |
-        if [ ! -f res/fonts/MaruBuri-Bold.ttf ]; then
-          wget -O res/fonts/MaruBuri-Bold.ttf https://github.com/guesswho/maruburi/raw/master/fonts/MaruBuri-Bold.ttf || true
-        fi
-
-    - name: Create placeholder icon if not exists
-      run: |
-        if [ ! -f res/drawable/icon.png ]; then
-          sudo apt install -y imagemagick
-          convert -size 512x512 xc:purple -fill white -gravity center -pointsize 72 -draw "text 0,0 '산내음'" res/drawable/icon.png || \
-          touch res/drawable/icon.png
-        fi
+        $HOME/android-sdk/cmdline-tools/latest/bin/sdkmanager "platform-tools" "platforms;android-33" "build-tools;33.0.2" > /dev/null 2>&1
 
     - name: Build with buildozer
       run: |
         buildozer android debug
-      env:
-        ANDROID_HOME: ${{ env.ANDROID_HOME }}
-        PATH: ${{ env.PATH }}
 
     - name: Upload APK artifact
       uses: actions/upload-artifact@v4
@@ -121,21 +56,3 @@ jobs:
         name: sannaeeum-link-apk
         path: bin/*.apk
         if-no-files-found: error
-
-    - name: Get APK file name
-      id: apk
-      run: |
-        APK_FILE=$(ls bin/*.apk | head -n 1)
-        echo "apk_file=$APK_FILE" >> $GITHUB_OUTPUT
-        echo "apk_name=$(basename $APK_FILE)" >> $GITHUB_OUTPUT
-
-    - name: Create Release
-      if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
-      uses: softprops/action-gh-release@v2
-      with:
-        name: Release ${{ github.sha }}
-        tag_name: v${{ github.run_number }}
-        files: |
-          ${{ steps.apk.outputs.apk_file }}
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
