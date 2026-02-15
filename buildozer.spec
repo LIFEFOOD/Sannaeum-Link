@@ -1,111 +1,99 @@
-[app]
+name: Build Android APK
 
-# (str) Title of your application
-title = 산내음 링크
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
 
-# (str) Package name
-package.name = sannaeeumlink
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
 
-# (str) Package domain (needed for android/ios packaging)
-package.domain = org.sannaeeum
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.9'
 
-# (str) Source code where the main.py live
-source.dir = .
+    - name: Install system dependencies
+      run: |
+        sudo apt update
+        sudo apt install -y git wget unzip zip openjdk-17-jdk python3-pip python3-setuptools python3-dev libltdl-dev libffi-dev libssl-dev autoconf automake cmake ccache libtool pkg-config zlib1g-dev
+    - name: Install Cython and buildozer
+      run: |
+        pip install --upgrade pip
+        pip install cython==0.29.36
+        pip install buildozer
+    - name: Install Android SDK dependencies
+      run: |
+        mkdir -p $HOME/android-sdk/cmdline-tools
+        cd $HOME/android-sdk/cmdline-tools
+        wget -q https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip
+        unzip -q commandlinetools-linux-9477386_latest.zip
+        mv cmdline-tools latest
+        echo "ANDROID_HOME=$HOME/android-sdk" >> $GITHUB_ENV
+        echo "$HOME/android-sdk/cmdline-tools/latest/bin" >> $GITHUB_PATH
+        yes | $HOME/android-sdk/cmdline-tools/latest/bin/sdkmanager --licenses > /dev/null 2>&1 || true
+    - name: Setup Android SDK
+      run: |
+        $HOME/android-sdk/cmdline-tools/latest/bin/sdkmanager "platform-tools" "platforms;android-33" "build-tools;33.0.2" > /dev/null 2>&1
+    - name: Decode Keystore
+      env:
+        KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+      run: |
+        echo "$KEYSTORE_BASE64" | base64 --decode > sannaeeum.keystore
+        chmod 600 sannaeeum.keystore
+    - name: Build with buildozer (release)
+      env:
+        KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+        KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+      run: |
+        # 자세한 로그를 위해 verbose 모드로 실행
+        buildozer --verbose android release
+    - name: Debug - Find build artifacts
+      if: always()  # 빌드 성공/실패와 관계없이 실행
+      run: |
+        echo "=== Current directory ==="
+        pwd
+        echo "=== Directory contents ==="
+        ls -la
+        echo "=== bin directory ==="
+        if [ -d "bin" ]; then
+          ls -la bin/
+        else
+          echo "bin directory not found"
+        fi
+        echo "=== Searching for APK files ==="
+        find . -name "*.apk" -type f | while read file; do
+          echo "Found APK: $file"
+          ls -la "$file"
+        done
+        echo "=== Searching for build logs ==="
+        find . -name "*.log" -type f | while read log; do
+          echo "--- $log ---"
+          tail -50 "$log"
+        done
+    - name: Upload APK artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: sannaeeum-link-apk
+        path: |
+          bin/*.apk
+          **/*.apk
+        if-no-files-found: warn  # error에서 warn으로 변경
 
-# (list) Source files to include
-source.include_exts = py,png,jpg,kv,ttf,txt
-
-# (list) Source files to exclude
-source.exclude_exts = spec
-
-# (str) Application versioning
-version = 0.1
-
-# (list) Application requirements - 중요: 필요한 패키지 모두 명시
-requirements = python3,kivy==2.2.1,pyjnius,android
-
-# (str) Icon of the application
-icon.filename = %(source.dir)s/res/drawable/icon.png
-
-# (str) Supported orientation
-orientation = portrait
-
-#
-# Android specific
-#
-
-# (bool) Indicate if the application should be fullscreen or not
-fullscreen = 0
-
-# (list) Permissions - 중요: 저장소 권한 추가
-android.permissions = INTERNET,WRITE_EXTERNAL_STORAGE,READ_EXTERNAL_STORAGE
-
-# (int) Target Android API
-android.api = 33
-
-# (int) Minimum API
-android.minapi = 21
-
-# (str) Android NDK version
-android.ndk = 25b
-
-# (bool) Automatically accept SDK license
-android.accept_sdk_license = True
-
-# (str) The Android arch to build for
-android.archs = armeabi-v7a
-
-# (bool) Indicate that the application should be debuggable
-android.debug = False
-
-# (bool) Enable AndroidX support
-android.use_androidx = True
-
-# Gradle dependencies - 중요: AndroidX 코어 추가
-android.gradle_dependencies = 'androidx.core:core:1.9.0'
-
-# Gradle 데몬 메모리 설정
-android.gradle_options = -Xmx1024M
-
-# ===== APK 파일명 설정 =====
-# (str) Filename for the release APK
-android.filename = sannaeeum
-
-# (str) Package format (apk or aab)
-android.package_format = apk
-
-# ===== 키스토어 설정 =====
-# (str) Full path to the keystore
-android.keystore = %(source.dir)s/sannaeeum.keystore
-
-# (str) Keystore password
-android.keystore_password = $(KEYSTORE_PASSWORD)
-
-# (str) Keystore alias
-android.keystore_alias = sannaeeum
-
-# (str) Key password
-android.key_password = $(KEY_PASSWORD)
-
-# (bool) Indicate if it's a release build
-android.release = True
-
-# (str) The version of the build tools to use
-android.build_tools = 33.0.2
-
-# (str) The version of the NDK to use
-android.ndk_version = 25.1.8937393
-
-# (str) The p4a bootstrap to use
-android.bootstrap = sdl2
-
-# (str) Log level
-log_level = 2
-
-[buildozer]
-
-# (int) Log level
-log_level = 2
-
-# (bool) Warn if the application is built as root
-warn_on_root = 1
+    - name: Upload build logs on failure
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: build-logs
+        path: |
+          .buildozer/*.log
+          ~/.buildozer/*.log
+          *.log
+        if-no-files-found: ignore
