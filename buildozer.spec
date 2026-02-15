@@ -94,7 +94,7 @@ fullscreen = 0
 android.permissions = INTERNET,WRITE_EXTERNAL_STORAGE,READ_EXTERNAL_STORAGE,READ_CLIPBOARD
 
 # (str) Android manifest에 클립보드 권한 명시적 추가
-android.extra_manifest_xml = <uses-permission android:name="android.permission.READ_CLIPBOARD" />
+# android.extra_manifest_xml = <uses-permission android:name="android.permission.READ_CLIPBOARD" />
 
 # (int) Target Android API, should be as high as possible.
 android.api = 33
