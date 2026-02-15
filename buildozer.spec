@@ -185,7 +185,7 @@ android.gradle_dependencies =
 # Gradle 데몬 메모리 설정
 android.gradle_options = -Xmx1024M
 
-# ===== APK 파일명 설정 (추가됨) =====
+# ===== APK 파일명 설정 (유지) =====
 # (str) Filename for the release APK
 android.filename = sannaeeum
 
