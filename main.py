@@ -240,43 +240,37 @@ class KoreanTextInput(TextInput):
         self.show_context_menu(touch_pos)
     
     def show_context_menu(self, touch_pos):
-        """한글 컨텍스트 메뉴 표시 - 팝업 이동 없이"""
+        """한글 컨텍스트 메뉴 표시 - 항상 모든 메뉴 표시"""
         
-        # 메뉴 컨텐츠 생성
-        content = BoxLayout(orientation='vertical', spacing=dp(5), size_hint_y=None)
-        content.bind(minimum_height=content.setter('height'))
+        # 항상 모든 메뉴 아이템 표시
+        menu_items = [
+            ('잘라내기', self.cut),
+            ('복사', self.copy),
+            ('붙여넣기', self.paste),
+            ('전체선택', self.select_all)
+        ]
         
-        # 선택된 텍스트가 있는지 확인
-        has_selection = bool(self.selection_text)
+        # 가로 방향 버튼 레이아웃 생성
+        content = BoxLayout(
+            orientation='horizontal', 
+            spacing=dp(5), 
+            size_hint=(None, None),
+            padding=[dp(5), dp(5), dp(5), dp(5)]
+        )
         
-        # 메뉴 버튼들
-        menu_items = []
-        
-        if has_selection:
-            menu_items.extend([
-                ('잘라내기', self.cut),
-                ('복사', self.copy),
-            ])
-        
-        # 붙여넣기는 항상 표시 (클립보드 확인 로직 단순화)
-        menu_items.append(('붙여넣기', self.paste))
-        
-        # 전체선택은 항상 표시
-        if self.text:
-            menu_items.append(('전체선택', self.select_all))
-        
-        # 메뉴가 없으면 표시하지 않음
-        if not menu_items:
-            return
-        
-        # 버튼 생성
+        # 버튼 생성 (가로로 배치)
         for text, callback in menu_items:
             btn = Button(
                 text=text,
-                size_hint_y=None,
-                height=dp(45),
+                size_hint=(None, None),
+                width=dp(85),  # 버튼 너비 약간 증가 (한글 4글자 고려)
+                height=dp(48),
                 background_color=hex_to_rgb(COLORS['primary']),
-                font_name=get_font_name()
+                background_normal='',
+                color=hex_to_rgb(COLORS['white']),
+                font_name=get_font_name(),
+                font_size=dp(14),
+                bold=True  # 텍스트 굵게
             )
             
             # 콜백 함수를 래핑하여 팝업 닫기 추가
@@ -291,31 +285,36 @@ class KoreanTextInput(TextInput):
             btn.bind(on_press=make_callback(callback))
             content.add_widget(btn)
         
+        # 컨텐츠 크기 계산
+        content.width = len(menu_items) * (dp(85) + dp(5)) + dp(10)  # 버튼 너비 + 간격 + 패딩
+        content.height = dp(58)  # 버튼 높이 + 패딩
+        
         # 팝업 생성 - 배경색 설정
         popup = Popup(
             title='',
             content=content,
             size_hint=(None, None),
-            width=dp(200),
-            height=len(menu_items) * dp(50) + dp(10),
+            size=(content.width, content.height),
             background_color=hex_to_rgb(COLORS['primary_dark'], 0.95),
-            auto_dismiss=True
+            auto_dismiss=True,
+            separator_height=0,  # 구분선 제거
+            border=(0, 0, 0, 0)  # 테두리 제거
         )
         
         # 터치 위치 근처에 팝업 표시 (화면 경계 처리)
-        popup_x = touch_pos[0] - dp(100)  # 팝업 너비의 절반 정도 왼쪽으로
-        popup_y = touch_pos[1] - dp(30)   # 터치 위치보다 약간 위쪽으로
+        popup_x = touch_pos[0] - content.width / 2  # 팝업 중앙이 터치 위치에 오도록
+        popup_y = touch_pos[1] - content.height - dp(10)  # 터치 위치 위쪽에 표시
         
         # 화면 경계 체크
         if popup_x < 0:
             popup_x = dp(10)
-        elif popup_x + dp(200) > Window.width:
-            popup_x = Window.width - dp(210)
+        elif popup_x + content.width > Window.width:
+            popup_x = Window.width - content.width - dp(10)
         
         if popup_y < 0:
-            popup_y = dp(10)
-        elif popup_y + len(menu_items) * dp(50) > Window.height:
-            popup_y = Window.height - len(menu_items) * dp(50) - dp(10)
+            popup_y = touch_pos[1] + dp(10)  # 터치 위치 아래쪽에 표시
+        elif popup_y + content.height > Window.height:
+            popup_y = Window.height - content.height - dp(10)
         
         popup.pos = (popup_x, popup_y)
         
@@ -353,6 +352,14 @@ class KoreanTextInput(TextInput):
                     Clipboard.copy(self.selection_text)
                     self.delete_selection()
                     return True
+                else:
+                    # 선택된 텍스트가 없으면 전체 선택 후 잘라내기
+                    self.select_all()
+                    if self.selection_text:
+                        from kivy.core.clipboard import Clipboard
+                        Clipboard.copy(self.selection_text)
+                        self.delete_selection()
+                        return True
             except:
                 pass
             return False
@@ -368,6 +375,13 @@ class KoreanTextInput(TextInput):
                     from kivy.core.clipboard import Clipboard
                     Clipboard.copy(self.selection_text)
                     return True
+                else:
+                    # 선택된 텍스트가 없으면 전체 선택 후 복사
+                    self.select_all()
+                    if self.selection_text:
+                        from kivy.core.clipboard import Clipboard
+                        Clipboard.copy(self.selection_text)
+                        return True
             except:
                 pass
             return False
