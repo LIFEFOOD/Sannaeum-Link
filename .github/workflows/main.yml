@@ -58,49 +58,13 @@ jobs:
         KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
         KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
       run: |
-        # 자세한 로그를 위해 verbose 모드로 실행
-        buildozer --verbose android release
-
-    - name: Debug - Find build artifacts
-      if: always()  # 빌드 성공/실패와 관계없이 실행
-      run: |
-        echo "=== Current directory ==="
-        pwd
-        echo "=== Directory contents ==="
-        ls -la
-        echo "=== bin directory ==="
-        if [ -d "bin" ]; then
-          ls -la bin/
-        else
-          echo "bin directory not found"
-        fi
-        echo "=== Searching for APK files ==="
-        find . -name "*.apk" -type f | while read file; do
-          echo "Found APK: $file"
-          ls -la "$file"
-        done
-        echo "=== Searching for build logs ==="
-        find . -name "*.log" -type f | while read log; do
-          echo "--- $log ---"
-          tail -50 "$log"
-        done
+        buildozer android release
 
     - name: Upload APK artifact
       uses: actions/upload-artifact@v4
       with:
         name: sannaeeum-link-apk
         path: |
-          bin/*.apk
           **/*.apk
-        if-no-files-found: warn  # error에서 warn으로 변경
-
-    - name: Upload build logs on failure
-      if: failure()
-      uses: actions/upload-artifact@v4
-      with:
-        name: build-logs
-        path: |
-          .buildozer/*.log
-          ~/.buildozer/*.log
-          *.log
-        if-no-files-found: ignore
+          **/*.aab
+        if-no-files-found: warn
