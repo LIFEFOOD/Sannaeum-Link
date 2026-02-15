@@ -63,8 +63,8 @@ jobs:
     - name: Upload APK artifact
       uses: actions/upload-artifact@v4
       with:
-        name: sannaeeum-link-apk
+        name: 산내음-링크-apk
         path: |
           **/*.apk
-          **/*.aab
+          bin/*.apk
         if-no-files-found: warn
