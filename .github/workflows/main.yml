@@ -9,7 +9,7 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-22.04  # Ubuntu 22.04로 변경 (안정성)
+    runs-on: ubuntu-20.04  # Ubuntu 20.04로 변경 (더 안정적)
     
     steps:
     - name: Checkout code
@@ -18,25 +18,43 @@ jobs:
     - name: Set up Python
       uses: actions/setup-python@v5
       with:
-        python-version: '3.9'
+        python-version: '3.8'  # Python 3.8로 변경
 
     - name: Install system dependencies
       run: |
         sudo apt update
-        sudo apt install -y git wget unzip zip openjdk-17-jdk python3-pip python3-setuptools python3-dev libltdl-dev libffi-dev libssl-dev autoconf automake cmake ccache libtool pkg-config zlib1g-dev
+        sudo apt install -y \
+          git \
+          wget \
+          unzip \
+          zip \
+          openjdk-11-jdk \
+          python3-pip \
+          python3-setuptools \
+          python3-dev \
+          libltdl-dev \
+          libffi-dev \
+          libssl-dev \
+          autoconf \
+          automake \
+          cmake \
+          ccache \
+          libtool \
+          pkg-config \
+          zlib1g-dev
 
     - name: Install Cython and buildozer
       run: |
         pip install --upgrade pip
-        pip install cython==0.29.36
-        pip install buildozer
+        pip install cython==0.29.30
+        pip install buildozer==1.5.0
 
     - name: Install Android SDK dependencies
       run: |
         mkdir -p $HOME/android-sdk/cmdline-tools
         cd $HOME/android-sdk/cmdline-tools
-        wget -q https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip
-        unzip -q commandlinetools-linux-9477386_latest.zip
+        wget -q https://dl.google.com/android/repository/commandlinetools-linux-7583922_latest.zip
+        unzip -q commandlinetools-linux-7583922_latest.zip
         mv cmdline-tools latest
         echo "ANDROID_HOME=$HOME/android-sdk" >> $GITHUB_ENV
         echo "$HOME/android-sdk/cmdline-tools/latest/bin" >> $GITHUB_PATH
@@ -44,7 +62,7 @@ jobs:
 
     - name: Setup Android SDK
       run: |
-        $HOME/android-sdk/cmdline-tools/latest/bin/sdkmanager "platform-tools" "platforms;android-33" "build-tools;33.0.2" > /dev/null 2>&1
+        $HOME/android-sdk/cmdline-tools/latest/bin/sdkmanager "platform-tools" "platforms;android-31" "build-tools;30.0.3" > /dev/null 2>&1
 
     - name: Decode Keystore
       env:
@@ -53,12 +71,15 @@ jobs:
         echo "$KEYSTORE_BASE64" | base64 --decode > sannaeeum.keystore
         chmod 600 sannaeeum.keystore
 
-    - name: Build with buildozer (release)
+    - name: Build with buildozer
       env:
         KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
         KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
       run: |
-        buildozer android release
+        # 로컬 빌드 디렉토리 정리
+        rm -rf .buildozer
+        # 빌드 실행
+        buildozer -v android release
 
     - name: Upload APK artifact
       uses: actions/upload-artifact@v4
@@ -66,3 +87,4 @@ jobs:
         name: sannaeeum-link-apk
         path: bin/*.apk
         if-no-files-found: error
+        retention-days: 30
