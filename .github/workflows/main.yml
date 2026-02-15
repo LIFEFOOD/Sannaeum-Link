@@ -46,25 +46,13 @@ jobs:
       run: |
         $HOME/android-sdk/cmdline-tools/latest/bin/sdkmanager "platform-tools" "platforms;android-33" "build-tools;33.0.2" > /dev/null 2>&1
 
-    - name: Decode Keystore
-      env:
-        KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+    - name: Build with buildozer
       run: |
-        echo "$KEYSTORE_BASE64" | base64 --decode > sannaeeum.keystore
-        chmod 600 sannaeeum.keystore
-
-    - name: Build with buildozer (release)
-      env:
-        KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
-        KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
-      run: |
-        buildozer android release
+        buildozer android debug
 
     - name: Upload APK artifact
       uses: actions/upload-artifact@v4
       with:
         name: sannaeeum-link-apk
-        path: |
-          **/*.apk
-          **/*.aab
-        if-no-files-found: warn
+        path: bin/*.apk
+        if-no-files-found: error
