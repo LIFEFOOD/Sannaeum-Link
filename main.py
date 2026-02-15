@@ -42,6 +42,10 @@ from kivy.logger import Logger
 from kivy.utils import platform
 from functools import lru_cache
 
+# 안드로이드 네이티브 컨텍스트 메뉴 사용 설정
+if platform == 'android':
+    Window.softinput_mode = 'pan'  # 소프트 키보드 모드 설정
+
 # Kivy 한글 폰트 설정
 from kivy.core.text import LabelBase
 from kivy.resources import resource_add_path
@@ -163,6 +167,122 @@ def hex_to_rgb(hex_color, alpha=1.0):
     return (1, 1, 1, 1)
 
 # ============================================================
+# 한글 컨텍스트 메뉴를 지원하는 TextInput 클래스
+# ============================================================
+
+class KoreanTextInput(TextInput):
+    """한글 컨텍스트 메뉴를 지원하는 TextInput"""
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        # 안드로이드 네이티브 핸들 사용 설정
+        self.use_handles = True
+        if IS_ANDROID:
+            self.use_handles_android = True
+        
+        # 롱프레스 감지를 위한 변수
+        self.long_press_triggered = False
+        self.long_press_clock = None
+    
+    def on_touch_down(self, touch):
+        if self.collide_point(*touch.pos):
+            # 롱프레스 타이머 시작
+            self.long_press_triggered = False
+            self.long_press_clock = Clock.schedule_once(lambda dt: self.show_korean_menu(touch), 0.5)
+            
+            # 기존 동작 유지
+            if touch.is_double_tap:
+                self.long_press_clock.cancel()
+                self.select_all()
+                self.show_korean_menu(touch)
+        return super().on_touch_down(touch)
+    
+    def on_touch_up(self, touch):
+        if self.collide_point(*touch.pos) and hasattr(self, 'long_press_clock'):
+            self.long_press_clock.cancel()
+        return super().on_touch_up(touch)
+    
+    def on_touch_move(self, touch):
+        if self.collide_point(*touch.pos) and hasattr(self, 'long_press_clock'):
+            self.long_press_clock.cancel()
+        return super().on_touch_move(touch)
+    
+    def show_korean_menu(self, touch):
+        """한글 컨텍스트 메뉴 표시"""
+        if self.long_press_triggered:
+            return
+        
+        self.long_press_triggered = True
+        
+        # 메뉴 컨텐츠 생성
+        content = BoxLayout(orientation='vertical', spacing=dp(5), size_hint_y=None)
+        content.bind(minimum_height=content.setter('height'))
+        
+        # 선택된 텍스트가 있는지 확인
+        has_selection = bool(self.selection_text)
+        
+        # 메뉴 버튼들
+        menu_items = []
+        
+        if has_selection:
+            menu_items.extend([
+                ('잘라내기', self.cut),
+                ('복사', self.copy),
+            ])
+        
+        # 붙여넣기는 클립보드에 내용이 있을 때만
+        if self.paste():
+            menu_items.append(('붙여넣기', self.paste))
+        
+        # 전체선택은 항상 표시
+        if self.text:
+            menu_items.append(('전체선택', self.select_all))
+        
+        # 메뉴가 없으면 표시하지 않음
+        if not menu_items:
+            return
+        
+        # 버튼 생성
+        for text, callback in menu_items:
+            btn = Button(
+                text=text,
+                size_hint_y=None,
+                height=dp(45),
+                background_color=hex_to_rgb(COLORS['primary']),
+                font_name=get_font_name()
+            )
+            
+            # 콜백 함수를 래핑하여 팝업 닫기 추가
+            def make_callback(cb):
+                def wrapped(instance):
+                    cb()
+                    popup.dismiss()
+                return wrapped
+            
+            btn.bind(on_press=make_callback(callback))
+            content.add_widget(btn)
+        
+        # 팝업 생성
+        popup = Popup(
+            title='',
+            content=content,
+            size_hint=(0.6, None),
+            height=len(menu_items) * dp(50),
+            background_color=hex_to_rgb(COLORS['primary_dark'], 0.95),
+            auto_dismiss=True
+        )
+        
+        # 터치 위치 근처에 팝업 표시
+        popup.pos_hint = {'center_x': touch.x / Window.width, 'center_y': touch.y / Window.height}
+        popup.open()
+    
+    def paste(self):
+        """클립보드 내용 붙여넣기 (안드로이드 호환)"""
+        try:
+            return super().paste()
+        except:
+            return False
+
+# ============================================================
 # 키보드 인식 스크롤 가능한 팝업 클래스
 # ============================================================
 
@@ -214,7 +334,7 @@ class ScrollablePopup(Popup):
         super().dismiss()
 
 # ============================================================
-# 커스텀 위젯 클래스들 - 수정됨
+# 커스텀 위젯 클래스들
 # ============================================================
 
 class SimplePromotionButton(Button):
@@ -229,8 +349,13 @@ class SimplePromotionButton(Button):
         self.bold = True
         self.text = text
         
-        # 두 버튼 모두 0.5로 동일하게 설정
-        self.size_hint_x = 0.5
+        # 버튼별로 가로길이 비율 설정
+        if text == '산내음청결고춧가루':
+            self.size_hint_x = 0.52  # 52%
+        elif text == '풀밭청결고춧가루':
+            self.size_hint_x = 0.48  # 48%
+        else:
+            self.size_hint_x = 0.5
             
         self.padding = [dp(20), dp(10)]
         self.font_name = get_font_name()
@@ -487,7 +612,7 @@ class LinkCard(BoxLayout):
         threading.Thread(target=_open).start()
 
 # ============================================================
-# 메인 앱 클래스 - 검색란 줄 수정
+# 메인 앱 클래스
 # ============================================================
 
 class LinkApp(BoxLayout):
@@ -582,8 +707,8 @@ class LinkApp(BoxLayout):
         
         search_category_layout = BoxLayout(size_hint_y=None, height=dp(50), spacing=dp(6))
         
-        # 검색 입력란 - 183px (49.4%)
-        self.search_input = TextInput(
+        # 검색 입력란 - KoreanTextInput 사용
+        self.search_input = KoreanTextInput(
             hint_text='검색어 (OR, AND, NOT 사용 가능, 예: 바람 OR 김)',
             size_hint=(0.494, 1),  # 183/370 = 0.494
             background_color=hex_to_rgb(COLORS['white']),
@@ -591,7 +716,7 @@ class LinkApp(BoxLayout):
             font_name=font_name
         )
         
-        # 전체포함 버튼 - 68px (18.4%)
+        # 전체포함 버튼
         self.category_btn = Button(
             text='전체포함',
             size_hint=(0.184, 1),  # 68/370 = 0.184
@@ -600,7 +725,7 @@ class LinkApp(BoxLayout):
         )
         self.category_btn.bind(on_press=self.show_category_popup)
         
-        # 검색 버튼 - 50px (13.5%)
+        # 검색 버튼
         search_btn = Button(
             text='검색',
             size_hint=(0.135, 1),  # 50/370 = 0.135
@@ -609,7 +734,7 @@ class LinkApp(BoxLayout):
         )
         search_btn.bind(on_press=self.search_links)
         
-        # 전체 버튼 - 50px (13.5%)
+        # 전체 버튼
         clear_btn = Button(
             text='전체',
             size_hint=(0.135, 1),  # 50/370 = 0.135
@@ -1065,8 +1190,8 @@ class LinkApp(BoxLayout):
         content = BoxLayout(orientation='vertical', spacing=dp(8), padding=[dp(15), dp(10), dp(15), dp(10)], size_hint_y=None)
         content.bind(minimum_height=content.setter('height'))
         
-        # 제목 입력
-        self.title_input = TextInput(
+        # 제목 입력 - KoreanTextInput 사용
+        self.title_input = KoreanTextInput(
             hint_text='사이트 제목을 입력하세요',
             size_hint_y=None,
             height=dp(50),
@@ -1075,8 +1200,8 @@ class LinkApp(BoxLayout):
         self.title_input.bind(focus=self.on_input_focus)
         content.add_widget(self.title_input)
         
-        # 설명 입력
-        self.desc_input = TextInput(
+        # 설명 입력 - KoreanTextInput 사용
+        self.desc_input = KoreanTextInput(
             hint_text='사이트 설명을 입력하세요\n(여러 줄로 입력 가능)',
             size_hint_y=None,
             height=dp(80),
@@ -1086,8 +1211,8 @@ class LinkApp(BoxLayout):
         self.desc_input.bind(focus=self.on_input_focus)
         content.add_widget(self.desc_input)
         
-        # URL 입력
-        self.url_input = TextInput(
+        # URL 입력 - KoreanTextInput 사용
+        self.url_input = KoreanTextInput(
             hint_text='https://example.com',
             size_hint_y=None,
             height=dp(50),
@@ -1151,11 +1276,11 @@ class LinkApp(BoxLayout):
         
         scroll_content.add_widget(content)
         
-        # 스크롤 가능한 팝업 생성 - 적절한 높이로 설정
+        # 스크롤 가능한 팝업 생성
         popup = ScrollablePopup(
             title='',
             content=scroll_content,
-            size_hint=(0.9, 0.55),  # 화면의 55% 높이
+            size_hint=(0.9, 0.55),
             auto_dismiss=False
         )
         
@@ -1240,8 +1365,8 @@ class LinkApp(BoxLayout):
         content = BoxLayout(orientation='vertical', spacing=dp(8), padding=[dp(15), dp(10), dp(15), dp(10)], size_hint_y=None)
         content.bind(minimum_height=content.setter('height'))
         
-        # 제목 입력
-        title_input = TextInput(
+        # 제목 입력 - KoreanTextInput 사용
+        title_input = KoreanTextInput(
             text=link['title'],
             size_hint_y=None,
             height=dp(50),
@@ -1250,8 +1375,8 @@ class LinkApp(BoxLayout):
         title_input.bind(focus=self.on_input_focus)
         content.add_widget(title_input)
         
-        # 설명 입력
-        desc_input = TextInput(
+        # 설명 입력 - KoreanTextInput 사용
+        desc_input = KoreanTextInput(
             text=link['description'],
             size_hint_y=None,
             height=dp(80),
@@ -1261,8 +1386,8 @@ class LinkApp(BoxLayout):
         desc_input.bind(focus=self.on_input_focus)
         content.add_widget(desc_input)
         
-        # URL 입력
-        url_input = TextInput(
+        # URL 입력 - KoreanTextInput 사용
+        url_input = KoreanTextInput(
             text=link['url'],
             size_hint_y=None,
             height=dp(50),
@@ -1387,11 +1512,11 @@ class LinkApp(BoxLayout):
         
         scroll_content.add_widget(content)
         
-        # 스크롤 가능한 팝업 생성 - 적절한 높이로 설정
+        # 스크롤 가능한 팝업 생성
         popup = ScrollablePopup(
             title='',
             content=scroll_content,
-            size_hint=(0.9, 0.55),  # 화면의 55% 높이
+            size_hint=(0.9, 0.55),
             auto_dismiss=False
         )
         
