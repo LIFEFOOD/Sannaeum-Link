@@ -174,7 +174,7 @@ android.archs = armeabi-v7a
 #android.handle_gpu_death = False
 
 # (bool) Indicate that the application should be debuggable
-android.debug = False  # ← True에서 False로 변경 (릴리스 빌드용)
+android.debug = False  # 릴리스 빌드용
 
 # (bool) Enable AndroidX support
 #android.use_androidx = True
@@ -185,17 +185,17 @@ android.gradle_dependencies =
 # Gradle 데몬 메모리 설정
 android.gradle_options = -Xmx1024M
 
-# ===== 추가된 키스토어 설정 =====
+# ===== 키스토어 설정 (릴리스 빌드용) =====
 # (str) Full path to the keystore
 android.keystore = %(source.dir)s/sannaeeum.keystore
 
-# (str) Keystore password (실제 비밀번호로 변경하세요!)
+# (str) Keystore password
 android.keystore_password = [sskk0523**01]
 
-# (str) Keystore alias (영문으로 설정)
+# (str) Keystore alias
 android.keystore_alias = sannaeeum
 
-# (str) Key password (keystore_password와 동일하게 설정)
+# (str) Key password (keystore_password와 동일)
 android.key_password = [sskk0523**01]
 
 # (bool) Indicate if it's a release build
