@@ -90,14 +90,17 @@ fullscreen = 0
 #icon.adaptive_foreground.filename = %(source.dir)s/data/icon_fg.png
 #icon.adaptive_background.filename = %(source.dir)s/data/icon_bg.png
 
-# (list) Permissions
-android.permissions = INTERNET,WRITE_EXTERNAL_STORAGE,READ_EXTERNAL_STORAGE
+# (list) Permissions - READ_CLIPBOARD 추가됨
+android.permissions = INTERNET,WRITE_EXTERNAL_STORAGE,READ_EXTERNAL_STORAGE,READ_CLIPBOARD
+
+# (str) Android manifest에 클립보드 권한 명시적 추가
+android.extra_manifest_xml = <uses-permission android:name="android.permission.READ_CLIPBOARD" />
 
 # (int) Target Android API, should be as high as possible.
 android.api = 33
 
 # (int) Minimum API your APK / AAB will support.
-android.minapi = 21
+android.minapi = 23
 
 # (int) Android SDK version to use
 # android.sdk = 33  # deprecated, but kept for compatibility
@@ -184,7 +187,6 @@ android.gradle_dependencies =
 
 # Gradle 데몬 메모리 설정
 android.gradle_options = -Xmx1024M
-
 
 # (str) The name of the bundle (aab file)
 #android.bundle_name = sannaeeumlink
