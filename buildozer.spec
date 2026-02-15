@@ -174,10 +174,10 @@ android.archs = armeabi-v7a
 #android.handle_gpu_death = False
 
 # (bool) Indicate that the application should be debuggable
-android.debug = False  # 릴리스 빌드용
+android.debug = True
 
 # (bool) Enable AndroidX support
-android.use_androidx = True
+#android.use_androidx = True
 
 # android.gradle_dependencies = 'androidx.core:core:1.7.0'  ← 주석 처리
 android.gradle_dependencies =
@@ -185,28 +185,6 @@ android.gradle_dependencies =
 # Gradle 데몬 메모리 설정
 android.gradle_options = -Xmx1024M
 
-# ===== APK 파일명 설정 (유지) =====
-# (str) Filename for the release APK
-android.filename = sannaeeum
-
-# (str) Package format (apk or aab)
-android.package_format = apk
-
-# ===== 키스토어 설정 (릴리스 빌드용) =====
-# (str) Full path to the keystore
-android.keystore = %(source.dir)s/sannaeeum.keystore
-
-# (str) Keystore password - GitHub Actions에서는 환경변수로 대체됨
-android.keystore_password = $(KEYSTORE_PASSWORD)
-
-# (str) Keystore alias
-android.keystore_alias = sannaeeum
-
-# (str) Key password - GitHub Actions에서는 환경변수로 대체됨
-android.key_password = $(KEY_PASSWORD)
-
-# (bool) Indicate if it's a release build
-android.release = True
 
 # (str) The name of the bundle (aab file)
 #android.bundle_name = sannaeeumlink
