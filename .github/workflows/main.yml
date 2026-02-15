@@ -23,7 +23,7 @@ jobs:
     - name: Install system dependencies
       run: |
         sudo apt update
-        sudo apt install -y git wget unzip zip openjdk-17-jdk python3-pip python3-setuptools python3-dev libltdl-dev libffi-dev libssl-dev autoconf automake cmake ccache libtool pkg-config zlib1g-dev
+        sudo apt install -y git wget unzip zip openjdk-17-jdk python3-pip python3-setuptools python3-dev libltdl-dev libffi-dev libssl-dev autoconf automake cmake ccache libtool pkg-config zlib1g-go
 
     - name: Install Cython and buildozer
       run: |
@@ -64,7 +64,5 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: sannaeeum-link-apk
-        path: |
-          **/*.apk
-          **/*.aab
-        if-no-files-found: warn
+        path: bin/*.apk
+        if-no-files-found: error
