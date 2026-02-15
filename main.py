@@ -44,7 +44,8 @@ from functools import lru_cache
 
 # 안드로이드 네이티브 컨텍스트 메뉴 사용 설정
 if platform == 'android':
-    Window.softinput_mode = 'pan'  # 소프트 키보드 모드 설정
+    # 중요: 키보드가 올라와도 팝업이 이동하지 않도록 'pan' 대신 'below_target' 사용
+    Window.softinput_mode = 'below_target'  # 키보드가 올라와도 팝업 위치 고정
 
 # Kivy 한글 폰트 설정
 from kivy.core.text import LabelBase
@@ -167,11 +168,11 @@ def hex_to_rgb(hex_color, alpha=1.0):
     return (1, 1, 1, 1)
 
 # ============================================================
-# 한글 컨텍스트 메뉴를 지원하는 TextInput 클래스
+# 수정 1: 한글 컨텍스트 메뉴를 지원하는 TextInput 클래스
 # ============================================================
 
 class KoreanTextInput(TextInput):
-    """한글 컨텍스트 메뉴를 지원하는 TextInput"""
+    """한글 컨텍스트 메뉴를 지원하는 TextInput - 팝업 고정 및 컨텍스트 메뉴 전체 표시"""
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         # 안드로이드 네이티브 핸들 사용 설정
@@ -182,36 +183,64 @@ class KoreanTextInput(TextInput):
         # 롱프레스 감지를 위한 변수
         self.long_press_triggered = False
         self.long_press_clock = None
+        self.is_long_press = False
+        
+        # 컨텍스트 메뉴 팝업 참조
+        self.context_popup = None
     
     def on_touch_down(self, touch):
         if self.collide_point(*touch.pos):
-            # 롱프레스 타이머 시작
+            # 롱프레스 타이머 시작 (0.5초)
             self.long_press_triggered = False
-            self.long_press_clock = Clock.schedule_once(lambda dt: self.show_korean_menu(touch), 0.5)
+            self.is_long_press = False
+            self.long_press_clock = Clock.schedule_once(self.on_long_press, 0.5)
             
-            # 기존 동작 유지
+            # 더블탭 처리
             if touch.is_double_tap:
                 self.long_press_clock.cancel()
                 self.select_all()
-                self.show_korean_menu(touch)
+                return True
         return super().on_touch_down(touch)
     
     def on_touch_up(self, touch):
-        if self.collide_point(*touch.pos) and hasattr(self, 'long_press_clock'):
-            self.long_press_clock.cancel()
+        if self.collide_point(*touch.pos):
+            if hasattr(self, 'long_press_clock') and self.long_press_clock:
+                self.long_press_clock.cancel()
+            
+            # 롱프레스가 아니고 기존 컨텍스트 팝업이 없으면 기본 포커스 동작
+            if not self.is_long_press and not self.context_popup:
+                # 기본 포커스 동작은 유지하되 팝업 이동 방지는 Window.softinput_mode로 처리
+                pass
+        
         return super().on_touch_up(touch)
     
     def on_touch_move(self, touch):
-        if self.collide_point(*touch.pos) and hasattr(self, 'long_press_clock'):
-            self.long_press_clock.cancel()
+        if self.collide_point(*touch.pos):
+            if hasattr(self, 'long_press_clock') and self.long_press_clock:
+                self.long_press_clock.cancel()
         return super().on_touch_move(touch)
     
-    def show_korean_menu(self, touch):
-        """한글 컨텍스트 메뉴 표시"""
+    def on_long_press(self, dt):
+        """롱프레스 발생 시 컨텍스트 메뉴 표시"""
         if self.long_press_triggered:
             return
         
         self.long_press_triggered = True
+        self.is_long_press = True
+        
+        # 기존 컨텍스트 팝업이 있으면 닫기
+        if self.context_popup:
+            self.context_popup.dismiss()
+            self.context_popup = None
+        
+        # 현재 터치 위치 가져오기 (마지막 터치 위치)
+        touch_pos = Window.mouse_pos if hasattr(Window, 'mouse_pos') else (self.center_x, self.center_y)
+        
+        # 컨텍스트 메뉴 표시
+        self.show_context_menu(touch_pos)
+    
+    def show_context_menu(self, touch_pos):
+        """한글 컨텍스트 메뉴 표시 - 팝업 이동 없이"""
         
         # 메뉴 컨텐츠 생성
         content = BoxLayout(orientation='vertical', spacing=dp(5), size_hint_y=None)
@@ -229,9 +258,8 @@ class KoreanTextInput(TextInput):
                 ('복사', self.copy),
             ])
         
-        # 붙여넣기는 클립보드에 내용이 있을 때만
-        if self.paste():
-            menu_items.append(('붙여넣기', self.paste))
+        # 붙여넣기는 항상 표시 (클립보드 확인 로직 단순화)
+        menu_items.append(('붙여넣기', self.paste))
         
         # 전체선택은 항상 표시
         if self.text:
@@ -255,24 +283,46 @@ class KoreanTextInput(TextInput):
             def make_callback(cb):
                 def wrapped(instance):
                     cb()
-                    popup.dismiss()
+                    if self.context_popup:
+                        self.context_popup.dismiss()
+                        self.context_popup = None
                 return wrapped
             
             btn.bind(on_press=make_callback(callback))
             content.add_widget(btn)
         
-        # 팝업 생성
+        # 팝업 생성 - 배경색 설정
         popup = Popup(
             title='',
             content=content,
-            size_hint=(0.6, None),
-            height=len(menu_items) * dp(50),
+            size_hint=(None, None),
+            width=dp(200),
+            height=len(menu_items) * dp(50) + dp(10),
             background_color=hex_to_rgb(COLORS['primary_dark'], 0.95),
             auto_dismiss=True
         )
         
-        # 터치 위치 근처에 팝업 표시
-        popup.pos_hint = {'center_x': touch.x / Window.width, 'center_y': touch.y / Window.height}
+        # 터치 위치 근처에 팝업 표시 (화면 경계 처리)
+        popup_x = touch_pos[0] - dp(100)  # 팝업 너비의 절반 정도 왼쪽으로
+        popup_y = touch_pos[1] - dp(30)   # 터치 위치보다 약간 위쪽으로
+        
+        # 화면 경계 체크
+        if popup_x < 0:
+            popup_x = dp(10)
+        elif popup_x + dp(200) > Window.width:
+            popup_x = Window.width - dp(210)
+        
+        if popup_y < 0:
+            popup_y = dp(10)
+        elif popup_y + len(menu_items) * dp(50) > Window.height:
+            popup_y = Window.height - len(menu_items) * dp(50) - dp(10)
+        
+        popup.pos = (popup_x, popup_y)
+        
+        # 팝업 닫힐 때 참조 제거
+        popup.bind(on_dismiss=lambda x: setattr(self, 'context_popup', None))
+        
+        self.context_popup = popup
         popup.open()
     
     def paste(self):
@@ -280,53 +330,114 @@ class KoreanTextInput(TextInput):
         try:
             return super().paste()
         except:
+            # 기본 붙여넣기 시도
+            try:
+                from kivy.core.clipboard import Clipboard
+                clipboard_data = Clipboard.paste()
+                if clipboard_data:
+                    self.insert_text(clipboard_data)
+                    return True
+            except:
+                pass
+            return False
+    
+    def cut(self):
+        """잘라내기"""
+        try:
+            return super().cut()
+        except:
+            # 기본 잘라내기 시도
+            try:
+                if self.selection_text:
+                    from kivy.core.clipboard import Clipboard
+                    Clipboard.copy(self.selection_text)
+                    self.delete_selection()
+                    return True
+            except:
+                pass
+            return False
+    
+    def copy(self):
+        """복사하기"""
+        try:
+            return super().copy()
+        except:
+            # 기본 복사 시도
+            try:
+                if self.selection_text:
+                    from kivy.core.clipboard import Clipboard
+                    Clipboard.copy(self.selection_text)
+                    return True
+            except:
+                pass
             return False
 
 # ============================================================
-# 키보드 인식 스크롤 가능한 팝업 클래스
+# 수정 2: 키보드에 독립적인 팝업 클래스
 # ============================================================
 
-class ScrollablePopup(Popup):
-    """키보드가 나타날 때 자동으로 스크롤되는 팝업 (상단 정렬)"""
+class FixedPositionPopup(Popup):
+    """키보드가 나타나도 위치가 고정되는 팝업"""
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.keyboard_height = 0
         self.active_input = None
         self.content_scroll = None
+        self.original_y = None
         
-        # 팝업을 화면 상단에 배치
-        self.pos_hint = {'top': 0.9}  # 화면 상단에서 10% 아래로
+        # 팝업 위치 저장
+        Clock.schedule_once(self.save_position, 0.1)
         
         # 키보드 높이 변경 이벤트 바인딩
         Window.bind(on_keyboard_height=self.on_keyboard_height)
     
+    def save_position(self, dt):
+        """팝업의 원래 위치 저장"""
+        self.original_y = self.y
+    
     def on_keyboard_height(self, window, height):
-        """키보드 높이 변경 시 호출"""
-        self.keyboard_height = height
-        if self.content_scroll and self.active_input:
-            # 키보드가 올라오면 활성화된 입력창으로 스크롤
+        """키보드 높이 변경 시 호출 - 팝업 위치 유지"""
+        if self.original_y is not None:
+            # 키보드가 올라와도 팝업 위치 고정
+            self.y = self.original_y
+        
+        # 활성화된 입력창이 있으면 스크롤 처리
+        if self.content_scroll and self.active_input and height > 0:
+            # 약간 지연시켜 스크롤 (위치는 고정)
             Clock.schedule_once(lambda dt: self.scroll_to_active_input(), 0.1)
     
     def scroll_to_active_input(self):
-        """활성화된 입력창으로 스크롤"""
+        """활성화된 입력창으로 스크롤 (팝업 위치는 고정)"""
         if not self.content_scroll or not self.active_input:
             return
         
-        # 입력창의 위치 계산
-        input_y = self.active_input.to_window(0, self.active_input.y)[1]
-        popup_y = self.to_window(0, self.y)[1]
+        # 입력창이 보이도록 스크롤만 조정 (팝업 위치는 변경하지 않음)
+        # ScrollView의 자식 위젯 높이 계산
+        scroll_view_height = self.content_scroll.height
+        content_height = self.content_scroll.children[0].height if self.content_scroll.children else 0
         
-        # 키보드 높이를 고려한 스크롤 위치 계산
-        if self.keyboard_height > 0:
-            # 키보드 위로 입력창이 보이도록 스크롤
-            target_scroll = (input_y - popup_y - self.keyboard_height) / max(1, self.content_scroll.height - self.content_scroll.height)
-            self.content_scroll.scroll_y = max(0, min(1, target_scroll))
+        if content_height > scroll_view_height:
+            # 입력창의 상대적 위치 계산
+            input_y_in_scroll = self.active_input.y
+            input_height = self.active_input.height
+            
+            # 입력창이 화면에 보이도록 스크롤 위치 계산
+            # 키보드 높이를 고려하여 입력창이 가려지지 않도록
+            target_scroll_y = 1.0 - (input_y_in_scroll / (content_height - scroll_view_height))
+            
+            # 키보드 높이를 고려한 추가 조정
+            if hasattr(Window, 'keyboard_height') and Window.keyboard_height > 0:
+                # 키보드 높이만큼 입력창이 위로 보이도록 조정
+                visible_ratio = 1.0 - (Window.keyboard_height / (content_height))
+                target_scroll_y = min(target_scroll_y, visible_ratio)
+            
+            self.content_scroll.scroll_y = max(0, min(1, target_scroll_y))
     
     def on_input_focus(self, instance, value):
         """입력창 포커스 변경 시 호출"""
         if value:
             self.active_input = instance
-            self.scroll_to_active_input()
+            if Window.keyboard_height > 0:
+                self.scroll_to_active_input()
     
     def dismiss(self):
         """팝업 닫을 때 이벤트 제거"""
@@ -334,7 +445,7 @@ class ScrollablePopup(Popup):
         super().dismiss()
 
 # ============================================================
-# 커스텀 위젯 클래스들
+# 커스텀 위젯 클래스들 (변경 없음)
 # ============================================================
 
 class SimplePromotionButton(Button):
@@ -612,7 +723,7 @@ class LinkCard(BoxLayout):
         threading.Thread(target=_open).start()
 
 # ============================================================
-# 메인 앱 클래스
+# 메인 앱 클래스 (수정됨)
 # ============================================================
 
 class LinkApp(BoxLayout):
@@ -698,13 +809,6 @@ class LinkApp(BoxLayout):
         font_name = get_font_name()
         
         # 검색/카테고리 줄 - 픽셀 기준으로 재계산
-        # 검색 입력란: 183px (49.4%)
-        # 전체포함: 68px (18.4%)
-        # 검색: 50px (13.5%)
-        # 전체: 50px (13.5%)
-        # 여백: 6px x 3 = 18px
-        # 합계: 369px (370px 기준 1px 여유)
-        
         search_category_layout = BoxLayout(size_hint_y=None, height=dp(50), spacing=dp(6))
         
         # 검색 입력란 - KoreanTextInput 사용
@@ -1276,8 +1380,8 @@ class LinkApp(BoxLayout):
         
         scroll_content.add_widget(content)
         
-        # 스크롤 가능한 팝업 생성
-        popup = ScrollablePopup(
+        # 수정: FixedPositionPopup 사용
+        popup = FixedPositionPopup(
             title='',
             content=scroll_content,
             size_hint=(0.9, 0.55),
@@ -1296,7 +1400,7 @@ class LinkApp(BoxLayout):
         """입력창 포커스 변경 시 팝업에 알림"""
         # 현재 열려있는 팝업 찾기
         for child in self.children:
-            if isinstance(child, ScrollablePopup):
+            if isinstance(child, FixedPositionPopup):
                 child.on_input_focus(instance, value)
                 break
     
@@ -1512,8 +1616,8 @@ class LinkApp(BoxLayout):
         
         scroll_content.add_widget(content)
         
-        # 스크롤 가능한 팝업 생성
-        popup = ScrollablePopup(
+        # 수정: FixedPositionPopup 사용
+        popup = FixedPositionPopup(
             title='',
             content=scroll_content,
             size_hint=(0.9, 0.55),
