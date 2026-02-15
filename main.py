@@ -167,9 +167,6 @@ def hex_to_rgb(hex_color, alpha=1.0):
         return (r, g, b, alpha)
     return (1, 1, 1, 1)
 
-# ============================================================
-# 수정 1: 한글 컨텍스트 메뉴를 지원하는 TextInput 클래스
-# ============================================================
 
 # ============================================================
 # 수정 1: 한글 컨텍스트 메뉴를 지원하는 TextInput 클래스 (안드로이드 최적화)
@@ -218,6 +215,10 @@ class KoreanTextInput(TextInput):
             if touch.is_double_tap:
                 self.long_press_clock.cancel()
                 self.select_all()
+                # 전체선택 후 메뉴 표시를 위해 롱프레스 타이머 다시 시작
+                self.long_press_clock = Clock.schedule_once(
+                    self.on_long_press, 0.2
+                )
                 return True
         
         return super().on_touch_down(touch)
@@ -300,10 +301,13 @@ class KoreanTextInput(TextInput):
             def make_callback(cb):
                 def wrapped(instance):
                     if not instance.disabled:
-                        cb()
+                        # 콜백 실행
+                        result = cb()
+                        # 팝업 닫기
                         if self.context_popup:
                             self.context_popup.dismiss()
                             self.context_popup = None
+                        return result
                 return wrapped
             
             btn.bind(on_press=make_callback(callback))
@@ -325,7 +329,7 @@ class KoreanTextInput(TextInput):
             border=(0, 0, 0, 0)
         )
         
-        # 위치 계산
+        # 위치 계산 - 터치 위치 위에 표시
         popup_x = touch_pos[0] - content.width / 2
         popup_y = touch_pos[1] - content.height - dp(20)
         
@@ -344,62 +348,138 @@ class KoreanTextInput(TextInput):
         self.context_popup = popup
         popup.open()
     
+    # ===== 수정된 paste 메소드 (pyjnius 사용) =====
     def paste(self):
-        """붙여넣기 - 안드로이드 클립보드 직접 접근"""
-        try:
-            # Kivy 기본 붙여넣기
-            return super().paste()
-        except:
+        """붙여넣기 - 안드로이드 네이티브 클립보드 직접 접근 (pyjnius)"""
+        if IS_ANDROID:
             try:
-                # 안드로이드 네이티브 클립보드
-                if IS_ANDROID:
+                # pyjnius로 안드로이드 클립보드 직접 접근
+                from jnius import autoclass
+                
+                # 안드로이드 클래스 로드
+                PythonActivity = autoclass('org.kivy.android.PythonActivity')
+                Context = autoclass('android.content.Context')
+                
+                # 현재 액티비티 컨텍스트 가져오기
+                context = PythonActivity.mActivity
+                
+                # 클립보드 서비스 가져오기
+                clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE)
+                
+                # 클립보드에 내용이 있는지 확인
+                if clipboard.hasPrimaryClip():
+                    clip = clipboard.getPrimaryClip()
+                    if clip and clip.getItemCount() > 0:
+                        # 첫 번째 아이템의 텍스트 가져오기
+                        item = clip.getItemAt(0)
+                        text = item.getText()
+                        if text:
+                            # 텍스트를 문자열로 변환하여 삽입
+                            self.insert_text(str(text))
+                            return True
+            except Exception as e:
+                print(f"pyjnius 클립보드 오류: {e}")
+                
+                # 폴백 1: android.clipboard 사용
+                try:
                     from android import clipboard
                     text = clipboard.get_clipboard_text()
                     if text:
                         self.insert_text(text)
                         return True
-            except:
-                pass
-            
+                except:
+                    pass
+                
+                # 폴백 2: Kivy Clipboard 사용
+                try:
+                    from kivy.core.clipboard import Clipboard
+                    text = Clipboard.paste()
+                    if text:
+                        self.insert_text(text)
+                        return True
+                except:
+                    pass
+        else:
+            # PC 환경에서는 기본 붙여넣기 사용
             try:
-                # Kivy Clipboard
-                from kivy.core.clipboard import Clipboard
-                text = Clipboard.paste()
-                if text:
-                    self.insert_text(text)
-                    return True
+                return super().paste()
             except:
-                pass
-            return False
+                try:
+                    from kivy.core.clipboard import Clipboard
+                    text = Clipboard.paste()
+                    if text:
+                        self.insert_text(text)
+                        return True
+                except:
+                    pass
+        
+        return False
     
     def cut(self):
         """잘라내기"""
-        try:
-            return super().cut()
-        except:
-            if self.selection_text:
+        if self.selection_text:
+            # 선택된 텍스트 저장
+            text = self.selection_text
+            
+            # 클립보드에 복사
+            if IS_ANDROID:
                 try:
-                    from kivy.core.clipboard import Clipboard
-                    Clipboard.copy(self.selection_text)
-                    self.delete_selection()
-                    return True
+                    from jnius import autoclass
+                    PythonActivity = autoclass('org.kivy.android.PythonActivity')
+                    Context = autoclass('android.content.Context')
+                    
+                    context = PythonActivity.mActivity
+                    clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE)
+                    
+                    # 클립보드에 텍스트 설정
+                    ClipData = autoclass('android.content.ClipData')
+                    clip = ClipData.newPlainText('label', text)
+                    clipboard.setPrimaryClip(clip)
                 except:
-                    pass
-            return False
+                    try:
+                        from android import clipboard
+                        clipboard.set_clipboard_text(text)
+                    except:
+                        from kivy.core.clipboard import Clipboard
+                        Clipboard.copy(text)
+            else:
+                from kivy.core.clipboard import Clipboard
+                Clipboard.copy(text)
+            
+            # 선택된 텍스트 삭제
+            self.delete_selection()
+            return True
+        return False
     
     def copy(self):
         """복사하기"""
-        try:
-            return super().copy()
-        except:
-            if self.selection_text:
+        if self.selection_text:
+            text = self.selection_text
+            
+            if IS_ANDROID:
                 try:
-                    from kivy.core.clipboard import Clipboard
-                    Clipboard.copy(self.selection_text)
-                    return True
+                    from jnius import autoclass
+                    PythonActivity = autoclass('org.kivy.android.PythonActivity')
+                    Context = autoclass('android.content.Context')
+                    
+                    context = PythonActivity.mActivity
+                    clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE)
+                    
+                    ClipData = autoclass('android.content.ClipData')
+                    clip = ClipData.newPlainText('label', text)
+                    clipboard.setPrimaryClip(clip)
                 except:
-                    pass
-            return False
+                    try:
+                        from android import clipboard
+                        clipboard.set_clipboard_text(text)
+                    except:
+                        from kivy.core.clipboard import Clipboard
+                        Clipboard.copy(text)
+            else:
+                from kivy.core.clipboard import Clipboard
+                Clipboard.copy(text)
+            return True
+        return False
 
 # ============================================================
 # 수정 2: 키보드에 독립적인 팝업 클래스
