@@ -21,7 +21,7 @@ source.exclude_exts = spec
 # (str) Application version
 version = 0.1
 
-# (list) Application requirements - 최소 요구사항
+# (list) Application requirements
 requirements = python3,kivy==2.1.0
 
 # (str) Icon of the application
@@ -41,18 +41,18 @@ fullscreen = 0
 android.permissions = INTERNET,WRITE_EXTERNAL_STORAGE,READ_EXTERNAL_STORAGE
 
 # (int) Target Android API
-android.api = 31
+android.api = 33
 
 # (int) Minimum API
 android.minapi = 21
 
-# (str) Android NDK version
-android.ndk = 23b
+# (str) Android NDK version - 25b로 변경 (python-for-android 요구사항)
+android.ndk = 25b
 
 # (bool) Automatically accept SDK license
 android.accept_sdk_license = True
 
-# (str) Android architectures - 단일 아키텍처
+# (str) Android architectures
 android.archs = armeabi-v7a
 
 # (bool) Debug mode
@@ -60,9 +60,6 @@ android.debug = False
 
 # (bool) Enable AndroidX support
 android.use_androidx = True
-
-# Gradle dependencies - 제거 (문제 발생 시)
-# android.gradle_dependencies =
 
 # Gradle options
 android.gradle_options = -Xmx1024M
@@ -80,19 +77,16 @@ android.key_password = $(KEY_PASSWORD)
 android.release = True
 
 # (str) Build tools version
-android.build_tools = 30.0.3
+android.build_tools = 33.0.2
 
 # (str) NDK version
-android.ndk_version = 23.1.7779620
+android.ndk_version = 25.2.9519653
 
 # (str) Bootstrap
 android.bootstrap = sdl2
 
 # (str) Log level
 log_level = 2
-
-# 추가: 안드로이드 아티팩트 설정
-android.add_src = 
 
 [buildozer]
 
