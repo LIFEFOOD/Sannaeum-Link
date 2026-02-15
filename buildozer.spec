@@ -76,8 +76,8 @@ android.use_androidx = True
 # Gradle 데몬 메모리 설정
 android.gradle_options = -Xmx1024M
 
-# ===== APK 파일로 빌드하도록 수정 =====
-# (str) Package format (apk or aab) - apk로 변경!
+# ===== APK 파일로 빌드 설정 =====
+# (str) Package format (apk or aab)
 android.package_format = apk
 
 # (str) Filename for the release APK
