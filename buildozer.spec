@@ -12,17 +12,23 @@ package.domain = org.sannaeeum
 # (str) Source code where the main.py live
 source.dir = .
 
-# (list) Source files to include
+# (list) Source files to include (let everything but .git)
 source.include_exts = py,png,jpg,kv,ttf,txt
 
-# (list) Source files to exclude
+# (list) Source files to exclude (e.g. you might don't want to upload your
 source.exclude_exts = spec
 
-# (str) Application versioning
+# (list) List of directory to exclude from the source
+#source.exclude_dirs = tests, bin
+
+# (list) List of patterns to ignore
+#source.exclude_patterns = license,images/*.jpg
+
+# (str) Application versioning (method 1: manual version)
 version = 0.1
 
-# (list) Application requirements - 중요: 필요한 패키지 모두 명시
-requirements = python3,kivy==2.2.1,pyjnius,android
+# (list) Application requirements
+requirements = python3,kivy
 
 # (str) Icon of the application
 icon.filename = %(source.dir)s/res/drawable/icon.png
@@ -31,13 +37,19 @@ icon.filename = %(source.dir)s/res/drawable/icon.png
 orientation = portrait
 
 #
+# OSX Specific
+#
+osx.python_version = 3
+osx.kivy_version = 2.2.1
+
+#
 # Android specific
 #
 
 # (bool) Indicate if the application should be fullscreen or not
 fullscreen = 0
 
-# (list) Permissions - 중요: 저장소 권한 추가
+# (list) Permissions
 android.permissions = INTERNET,WRITE_EXTERNAL_STORAGE,READ_EXTERNAL_STORAGE
 
 # (int) Target Android API
@@ -46,7 +58,7 @@ android.api = 33
 # (int) Minimum API
 android.minapi = 21
 
-# (str) Android NDK version
+# (str) Android NDK version to use
 android.ndk = 25b
 
 # (bool) Automatically accept SDK license
@@ -61,30 +73,20 @@ android.debug = False
 # (bool) Enable AndroidX support
 android.use_androidx = True
 
-# Gradle dependencies - 중요: AndroidX 코어 추가
-android.gradle_dependencies = 'androidx.core:core:1.9.0'
-
 # Gradle 데몬 메모리 설정
 android.gradle_options = -Xmx1024M
 
-# ===== APK 파일명 설정 =====
-# (str) Filename for the release APK
-android.filename = sannaeeum
-
-# (str) Package format (apk or aab)
+# ===== APK 파일로 빌드하도록 수정 =====
+# (str) Package format (apk or aab) - apk로 변경!
 android.package_format = apk
 
+# (str) Filename for the release APK
+android.filename = 산내음-링크
+
 # ===== 키스토어 설정 =====
-# (str) Full path to the keystore
 android.keystore = %(source.dir)s/sannaeeum.keystore
-
-# (str) Keystore password
 android.keystore_password = $(KEYSTORE_PASSWORD)
-
-# (str) Keystore alias
 android.keystore_alias = sannaeeum
-
-# (str) Key password
 android.key_password = $(KEY_PASSWORD)
 
 # (bool) Indicate if it's a release build
@@ -99,13 +101,11 @@ android.ndk_version = 25.1.8937393
 # (str) The p4a bootstrap to use
 android.bootstrap = sdl2
 
-# (str) Log level
+#
+# Logging
+#
 log_level = 2
 
 [buildozer]
-
-# (int) Log level
 log_level = 2
-
-# (bool) Warn if the application is built as root
 warn_on_root = 1
