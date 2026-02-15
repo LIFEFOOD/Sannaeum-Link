@@ -66,5 +66,4 @@ jobs:
         name: 산내음-링크-apk
         path: |
           **/*.apk
-          bin/*.apk
-        if-no-files-found: warn
+        if-no-files-found: error
