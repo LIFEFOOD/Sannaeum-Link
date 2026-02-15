@@ -171,125 +171,149 @@ def hex_to_rgb(hex_color, alpha=1.0):
 # 수정 1: 한글 컨텍스트 메뉴를 지원하는 TextInput 클래스
 # ============================================================
 
+# ============================================================
+# 수정 1: 한글 컨텍스트 메뉴를 지원하는 TextInput 클래스 (안드로이드 최적화)
+# ============================================================
+
 class KoreanTextInput(TextInput):
-    """한글 컨텍스트 메뉴를 지원하는 TextInput - 팝업 고정 및 컨텍스트 메뉴 전체 표시"""
+    """한글 컨텍스트 메뉴를 지원하는 TextInput - 안드로이드 롱프레스 강제 활성화"""
+    
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        # 안드로이드 네이티브 핸들 사용 설정
-        self.use_handles = True
-        if IS_ANDROID:
-            self.use_handles_android = True
         
-        # 롱프레스 감지를 위한 변수
+        # 중요: 안드로이드에서 롱프레스 강제 활성화
+        if IS_ANDROID:
+            self.use_handles = True
+            # 롱프레스 시간을 짧게 설정 (0.3초)
+            self.long_press_time = 0.3
+        
+        # 롱프레스 감지 변수
+        self.is_long_press = False
         self.long_press_triggered = False
         self.long_press_clock = None
-        self.is_long_press = False
+        self.last_touch_pos = (0, 0)
+        self.touch_down_time = 0
         
-        # 컨텍스트 메뉴 팝업 참조
+        # 컨텍스트 메뉴 참조
         self.context_popup = None
     
     def on_touch_down(self, touch):
         if self.collide_point(*touch.pos):
-            # 롱프레스 타이머 시작 (0.5초)
-            self.long_press_triggered = False
+            # 터치 정보 저장
+            self.last_touch_pos = touch.pos
+            self.touch_down_time = touch.time_start
             self.is_long_press = False
-            self.long_press_clock = Clock.schedule_once(self.on_long_press, 0.5)
+            self.long_press_triggered = False
             
-            # 더블탭 처리
+            # 기존 타이머 취소
+            if self.long_press_clock:
+                self.long_press_clock.cancel()
+            
+            # 롱프레스 타이머 시작 (0.3초)
+            self.long_press_clock = Clock.schedule_once(
+                self.on_long_press, 0.3
+            )
+            
+            # 더블탭으로 전체선택
             if touch.is_double_tap:
                 self.long_press_clock.cancel()
                 self.select_all()
                 return True
+        
         return super().on_touch_down(touch)
     
     def on_touch_up(self, touch):
         if self.collide_point(*touch.pos):
-            if hasattr(self, 'long_press_clock') and self.long_press_clock:
+            # 롱프레스 타이머 취소
+            if self.long_press_clock:
                 self.long_press_clock.cancel()
+                self.long_press_clock = None
             
-            # 롱프레스가 아니고 기존 컨텍스트 팝업이 없으면 기본 포커스 동작
-            if not self.is_long_press and not self.context_popup:
-                # 기본 포커스 동작은 유지하되 팝업 이동 방지는 Window.softinput_mode로 처리
+            # 롱프레스가 아니고, 짧은 터치면 포커스
+            if not self.is_long_press and not self.long_press_triggered:
+                # 기본 동작 (포커스)
                 pass
         
         return super().on_touch_up(touch)
     
     def on_touch_move(self, touch):
         if self.collide_point(*touch.pos):
-            if hasattr(self, 'long_press_clock') and self.long_press_clock:
+            # 움직임이 있으면 롱프레스 취소
+            if self.long_press_clock:
                 self.long_press_clock.cancel()
+                self.long_press_clock = None
         return super().on_touch_move(touch)
     
     def on_long_press(self, dt):
-        """롱프레스 발생 시 컨텍스트 메뉴 표시"""
+        """롱프레스 발생 - 컨텍스트 메뉴 표시"""
         if self.long_press_triggered:
             return
         
         self.long_press_triggered = True
         self.is_long_press = True
         
-        # 기존 컨텍스트 팝업이 있으면 닫기
+        # 기존 팝업 닫기
         if self.context_popup:
             self.context_popup.dismiss()
             self.context_popup = None
         
-        # 현재 터치 위치 가져오기 (마지막 터치 위치)
-        touch_pos = Window.mouse_pos if hasattr(Window, 'mouse_pos') else (self.center_x, self.center_y)
-        
-        # 컨텍스트 메뉴 표시
-        self.show_context_menu(touch_pos)
+        # 약간 지연시켜 메뉴 표시
+        Clock.schedule_once(lambda dt: self.show_context_menu(self.last_touch_pos), 0.05)
     
     def show_context_menu(self, touch_pos):
-        """한글 컨텍스트 메뉴 표시 - 항상 모든 메뉴 표시"""
+        """컨텍스트 메뉴 표시"""
+        # 선택된 텍스트 확인
+        has_selection = bool(self.selection_text)
         
-        # 항상 모든 메뉴 아이템 표시
+        # 메뉴 아이템
         menu_items = [
-            ('잘라내기', self.cut),
-            ('복사', self.copy),
-            ('붙여넣기', self.paste),
-            ('전체선택', self.select_all)
+            ('잘라내기', self.cut, has_selection),
+            ('복사', self.copy, has_selection),
+            ('붙여넣기', self.paste, True),
+            ('전체선택', self.select_all, True)
         ]
         
-        # 가로 방향 버튼 레이아웃 생성
+        # 가로 레이아웃
         content = BoxLayout(
-            orientation='horizontal', 
-            spacing=dp(5), 
+            orientation='horizontal',
+            spacing=dp(5),
             size_hint=(None, None),
-            padding=[dp(5), dp(5), dp(5), dp(5)]
+            padding=[dp(10), dp(5), dp(10), dp(5)]
         )
         
-        # 버튼 생성 (가로로 배치)
-        for text, callback in menu_items:
+        # 버튼 생성
+        for text, callback, enabled in menu_items:
             btn = Button(
                 text=text,
                 size_hint=(None, None),
-                width=dp(85),  # 버튼 너비 약간 증가 (한글 4글자 고려)
-                height=dp(48),
-                background_color=hex_to_rgb(COLORS['primary']),
+                width=dp(90),
+                height=dp(50),
+                background_color=hex_to_rgb(COLORS['primary'] if enabled else '#999999'),
                 background_normal='',
                 color=hex_to_rgb(COLORS['white']),
                 font_name=get_font_name(),
-                font_size=dp(14),
-                bold=True  # 텍스트 굵게
+                font_size=dp(16),
+                disabled=not enabled
             )
             
-            # 콜백 함수를 래핑하여 팝업 닫기 추가
+            # 콜백 래핑
             def make_callback(cb):
                 def wrapped(instance):
-                    cb()
-                    if self.context_popup:
-                        self.context_popup.dismiss()
-                        self.context_popup = None
+                    if not instance.disabled:
+                        cb()
+                        if self.context_popup:
+                            self.context_popup.dismiss()
+                            self.context_popup = None
                 return wrapped
             
             btn.bind(on_press=make_callback(callback))
             content.add_widget(btn)
         
-        # 컨텐츠 크기 계산
-        content.width = len(menu_items) * (dp(85) + dp(5)) + dp(10)  # 버튼 너비 + 간격 + 패딩
-        content.height = dp(58)  # 버튼 높이 + 패딩
+        # 크기 계산
+        content.width = len(menu_items) * (dp(90) + dp(5)) + dp(20)
+        content.height = dp(60)
         
-        # 팝업 생성 - 배경색 설정
+        # 팝업 생성
         popup = Popup(
             title='',
             content=content,
@@ -297,44 +321,52 @@ class KoreanTextInput(TextInput):
             size=(content.width, content.height),
             background_color=hex_to_rgb(COLORS['primary_dark'], 0.95),
             auto_dismiss=True,
-            separator_height=0,  # 구분선 제거
-            border=(0, 0, 0, 0)  # 테두리 제거
+            separator_height=0,
+            border=(0, 0, 0, 0)
         )
         
-        # 터치 위치 근처에 팝업 표시 (화면 경계 처리)
-        popup_x = touch_pos[0] - content.width / 2  # 팝업 중앙이 터치 위치에 오도록
-        popup_y = touch_pos[1] - content.height - dp(10)  # 터치 위치 위쪽에 표시
+        # 위치 계산
+        popup_x = touch_pos[0] - content.width / 2
+        popup_y = touch_pos[1] - content.height - dp(20)
         
-        # 화면 경계 체크
-        if popup_x < 0:
-            popup_x = dp(10)
-        elif popup_x + content.width > Window.width:
-            popup_x = Window.width - content.width - dp(10)
+        # 화면 경계 처리
+        popup_x = max(dp(10), min(popup_x, Window.width - content.width - dp(10)))
         
-        if popup_y < 0:
-            popup_y = touch_pos[1] + dp(10)  # 터치 위치 아래쪽에 표시
-        elif popup_y + content.height > Window.height:
-            popup_y = Window.height - content.height - dp(10)
+        if popup_y < dp(10):
+            popup_y = touch_pos[1] + dp(20)
+            popup_y = min(popup_y, Window.height - content.height - dp(10))
         
         popup.pos = (popup_x, popup_y)
         
-        # 팝업 닫힐 때 참조 제거
+        # 팝업 닫힘 이벤트
         popup.bind(on_dismiss=lambda x: setattr(self, 'context_popup', None))
         
         self.context_popup = popup
         popup.open()
     
     def paste(self):
-        """클립보드 내용 붙여넣기 (안드로이드 호환)"""
+        """붙여넣기 - 안드로이드 클립보드 직접 접근"""
         try:
+            # Kivy 기본 붙여넣기
             return super().paste()
         except:
-            # 기본 붙여넣기 시도
             try:
+                # 안드로이드 네이티브 클립보드
+                if IS_ANDROID:
+                    from android import clipboard
+                    text = clipboard.get_clipboard_text()
+                    if text:
+                        self.insert_text(text)
+                        return True
+            except:
+                pass
+            
+            try:
+                # Kivy Clipboard
                 from kivy.core.clipboard import Clipboard
-                clipboard_data = Clipboard.paste()
-                if clipboard_data:
-                    self.insert_text(clipboard_data)
+                text = Clipboard.paste()
+                if text:
+                    self.insert_text(text)
                     return True
             except:
                 pass
@@ -345,23 +377,14 @@ class KoreanTextInput(TextInput):
         try:
             return super().cut()
         except:
-            # 기본 잘라내기 시도
-            try:
-                if self.selection_text:
+            if self.selection_text:
+                try:
                     from kivy.core.clipboard import Clipboard
                     Clipboard.copy(self.selection_text)
                     self.delete_selection()
                     return True
-                else:
-                    # 선택된 텍스트가 없으면 전체 선택 후 잘라내기
-                    self.select_all()
-                    if self.selection_text:
-                        from kivy.core.clipboard import Clipboard
-                        Clipboard.copy(self.selection_text)
-                        self.delete_selection()
-                        return True
-            except:
-                pass
+                except:
+                    pass
             return False
     
     def copy(self):
@@ -369,21 +392,13 @@ class KoreanTextInput(TextInput):
         try:
             return super().copy()
         except:
-            # 기본 복사 시도
-            try:
-                if self.selection_text:
+            if self.selection_text:
+                try:
                     from kivy.core.clipboard import Clipboard
                     Clipboard.copy(self.selection_text)
                     return True
-                else:
-                    # 선택된 텍스트가 없으면 전체 선택 후 복사
-                    self.select_all()
-                    if self.selection_text:
-                        from kivy.core.clipboard import Clipboard
-                        Clipboard.copy(self.selection_text)
-                        return True
-            except:
-                pass
+                except:
+                    pass
             return False
 
 # ============================================================
@@ -827,7 +842,7 @@ class LinkApp(BoxLayout):
         
         # 검색 입력란 - KoreanTextInput 사용
         self.search_input = KoreanTextInput(
-            hint_text='검색어 (OR, AND, NOT 사용 가능, 예: 바람 OR 김)',
+            hint_text='검색어 (OR, AND, NOT  예: 바람 OR 김)',
             size_hint=(0.494, 1),  # 183/370 = 0.494
             background_color=hex_to_rgb(COLORS['white']),
             foreground_color=hex_to_rgb(COLORS['text_primary']),
