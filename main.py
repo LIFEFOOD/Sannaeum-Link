@@ -85,7 +85,9 @@ try:
         font_file = os.path.basename(FONT_PATH)
         LabelBase.register(name=FONT_NAME, fn_regular=font_file)
         KOREAN_FONT_AVAILABLE = True
+        print(f"✅ 마루부리 폰트 등록 성공: {FONT_PATH}")
     else:
+        print(f"⚠️ 마루부리 폰트를 찾을 수 없습니다: {FONT_PATH}")
         
         if IS_ANDROID:
             system_fonts = [
@@ -98,9 +100,10 @@ try:
                     resource_add_path(os.path.dirname(sys_font))
                     LabelBase.register(name=FONT_NAME, fn_regular=os.path.basename(sys_font))
                     KOREAN_FONT_AVAILABLE = True
-
+                    print(f"✅ 시스템 폰트로 대체: {sys_font}")
                     break
 except Exception as e:
+    print(f"⚠️ 폰트 등록 실패: {e}")
     KOREAN_FONT_AVAILABLE = False
 
 def get_font_name():
@@ -1788,6 +1791,9 @@ class SannaeeumLinkApp(App):
         return False
 
 if __name__ == '__main__':
+    print("산내음 링크 앱 시작 중...")
+    print(f"마루부리 폰트 사용 가능: {KOREAN_FONT_AVAILABLE}")
+    print(f"데이터 저장 경로: {DATA_DIR}")
     try:
         SannaeeumLinkApp().run()
     except Exception as e:
