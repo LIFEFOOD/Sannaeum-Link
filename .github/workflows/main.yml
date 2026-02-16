@@ -60,11 +60,34 @@ jobs:
       run: |
         buildozer android release
 
-    - name: Upload APK artifact
+    # ===== 패키지 포맷 확인 (디버깅용) =====
+    - name: Check package format
+      run: |
+        echo "=== buildozer.spec 설정 확인 ==="
+        grep -E "^(#\s*)?android\.package_format" buildozer.spec || echo "android.package_format 설정 없음 (기본값: apk)"
+        echo "================================="
+
+    # ===== 빌드된 파일 찾기 (bin 폴더 제외) =====
+    - name: Find build artifacts
+      run: |
+        echo "=== 빌드된 APK/AAB 파일 검색 (bin 폴더 제외) ==="
+        # bin 폴더를 제외하고 .apk, .aab 파일 찾기
+        find . -type d -name "bin" -prune -o -type f \( -name "*.apk" -o -name "*.aab" \) -print | while read file; do
+          echo "Found: $file"
+          # 파일을 현재 디렉토리로 복사
+          cp "$file" ./ || true
+        done
+        
+        # 현재 디렉토리에 복사된 파일 확인
+        echo "=== 현재 디렉토리의 APK/AAB 파일 ==="
+        ls -la *.apk *.aab 2>/dev/null || echo "파일 없음"
+
+    # ===== APK/AAB 아티팩트 업로드 =====
+    - name: Upload artifact
       uses: actions/upload-artifact@v4
       with:
-        name: sannaeeum-link-apk
+        name: sannaeeum-link-build
         path: |
-          **/*.apk
-          **/*.aab
+          *.apk
+          *.aab
         if-no-files-found: warn
