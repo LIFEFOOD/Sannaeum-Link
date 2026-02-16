@@ -1,20 +1,11 @@
-name: Build Samsung Store APK
+name: Build Android APK
 
 on:
   push:
     branches: [ main, master ]
-    tags:
-      - 'v*'  # 버전 태그가 푸시될 때만 빌드 (선택사항)
+  pull_request:
+    branches: [ main, master ]
   workflow_dispatch:
-    inputs:
-      version_name:
-        description: '앱 버전 이름 (예: 1.0.0)'
-        required: true
-        default: '1.0.0'
-      version_code:
-        description: '앱 버전 코드 (숫자, 증가시켜야 함)'
-        required: true
-        default: '1'
 
 jobs:
   build:
@@ -32,25 +23,7 @@ jobs:
     - name: Install system dependencies
       run: |
         sudo apt update
-        sudo apt install -y \
-          git \
-          wget \
-          unzip \
-          zip \
-          openjdk-17-jdk \
-          python3-pip \
-          python3-setuptools \
-          python3-dev \
-          libltdl-dev \
-          libffi-dev \
-          libssl-dev \
-          autoconf \
-          automake \
-          cmake \
-          ccache \
-          libtool \
-          pkg-config \
-          zlib1g-dev
+        sudo apt install -y git wget unzip zip openjdk-17-jdk python3-pip python3-setuptools python3-dev libltdl-dev libffi-dev libssl-dev autoconf automake cmake ccache libtool pkg-config zlib1g-dev
 
     - name: Install Cython and buildozer
       run: |
@@ -64,7 +37,6 @@ jobs:
         cd $HOME/android-sdk/cmdline-tools
         wget -q https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip
         unzip -q commandlinetools-linux-9477386_latest.zip
-        rm commandlinetools-linux-9477386_latest.zip
         mv cmdline-tools latest
         echo "ANDROID_HOME=$HOME/android-sdk" >> $GITHUB_ENV
         echo "$HOME/android-sdk/cmdline-tools/latest/bin" >> $GITHUB_PATH
@@ -72,99 +44,15 @@ jobs:
 
     - name: Setup Android SDK
       run: |
-        $HOME/android-sdk/cmdline-tools/latest/bin/sdkmanager \
-          "platform-tools" \
-          "platforms;android-33" \
-          "build-tools;33.0.2" \
-          "ndk;25.2.9519653" > /dev/null 2>&1
+        $HOME/android-sdk/cmdline-tools/latest/bin/sdkmanager "platform-tools" "platforms;android-33" "build-tools;33.0.2" > /dev/null 2>&1
 
-    - name: Decode Keystore
-      env:
-        KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+    - name: Build with buildozer
       run: |
-        echo "$KEYSTORE_BASE64" | base64 --decode > sannaeeum.keystore
-        chmod 600 sannaeeum.keystore
-        echo "키스토어 파일이 생성되었습니다."
+        buildozer android debug
 
-    - name: Update version in buildozer.spec
-      run: |
-        # workflow_dispatch로 입력받은 버전 정보로 업데이트
-        if [ "${{ github.event.inputs.version_name }}" != "" ]; then
-          sed -i "s/^version = .*/version = ${{ github.event.inputs.version_name }}/" buildozer.spec
-          sed -i "s/^android.version_code = .*/android.version_code = ${{ github.event.inputs.version_code }}/" buildozer.spec
-          sed -i "s/^android.version_name = .*/android.version_name = ${{ github.event.inputs.version_name }}/" buildozer.spec
-        fi
-        
-        # 태그가 푸시된 경우 태그에서 버전 추출
-        if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
-          VERSION_NAME=${GITHUB_REF#refs/tags/v}
-          VERSION_CODE=${VERSION_NAME//./}  # 1.0.0 -> 100
-          sed -i "s/^version = .*/version = $VERSION_NAME/" buildozer.spec
-          sed -i "s/^android.version_code = .*/android.version_code = $VERSION_CODE/" buildozer.spec
-          sed -i "s/^android.version_name = .*/android.version_name = $VERSION_NAME/" buildozer.spec
-        fi
-        
-        echo "=== 업데이트된 버전 정보 ==="
-        grep -E "^(version|android.version)" buildozer.spec
-
-    - name: Build with buildozer (release)
-      env:
-        KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
-        KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
-      run: |
-        echo "=== 빌드 시작 ==="
-        # 멀티 아키텍처 빌드
-        buildozer android release
-
-    - name: Verify and sign APK (zipalign and verify)
-      run: |
-        echo "=== APK 검증 ==="
-        
-        # 빌드된 APK 찾기
-        APK_FILE=$(find bin -name "*.apk" | head -1)
-        if [ -z "$APK_FILE" ]; then
-          echo "APK 파일을 찾을 수 없습니다."
-          exit 1
-        fi
-        
-        echo "APK 파일: $APK_FILE"
-        
-        # APK 정보 출력
-        echo "=== APK 정보 ==="
-        $ANDROID_HOME/build-tools/33.0.2/aapt dump badging "$APK_FILE" | grep -E "package|version"
-        
-        # 최종 APK 파일명 생성 (날짜 포함)
-        DATE_TAG=$(date +%Y%m%d)
-        FINAL_APK="sannaeeum-samsung-$DATE_TAG.apk"
-        cp "$APK_FILE" "./$FINAL_APK"
-        
-        echo "FINAL_APK=$FINAL_APK" >> $GITHUB_ENV
-
-    - name: Upload APK to artifact
+    - name: Upload APK artifact
       uses: actions/upload-artifact@v4
       with:
-        name: sannaeeum-samsung-apk
-        path: |
-          *.apk
+        name: sannaeeum-link-apk
+        path: bin/*.apk
         if-no-files-found: error
-        retention-days: 90  # 삼성 스토어 등록을 위해 90일 보관
-
-    - name: Create Release
-      if: startsWith(github.ref, 'refs/tags/v')
-      uses: softprops/action-gh-release@v1
-      with:
-        files: |
-          *.apk
-        generate_release_notes: true
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-    - name: Upload build logs on failure
-      if: failure()
-      uses: actions/upload-artifact@v4
-      with:
-        name: buildozer-logs
-        path: |
-          buildozer.log
-          .buildozer/
-        if-no-files-found: ignore
