@@ -6,6 +6,9 @@ import threading
 from pathlib import Path
 import sys
 import io
+import weakref
+from typing import List, Dict, Any, Callable, Optional
+from functools import lru_cache
 
 # Kivy 설정
 from kivy.config import Config
@@ -39,7 +42,7 @@ from kivy.metrics import dp
 from kivy.clock import Clock
 from kivy.logger import Logger
 from kivy.utils import platform
-from functools import lru_cache
+from kivy.animation import Animation
 
 # 안드로이드 네이티브 컨텍스트 메뉴 사용 설정
 if platform == 'android':
@@ -61,9 +64,12 @@ if IS_ANDROID:
         request_permissions([Permission.WRITE_EXTERNAL_STORAGE, Permission.READ_EXTERNAL_STORAGE])
         DATA_DIR = Path(app_storage_path()) / 'data'
     except:
-        from android.storage import primary_external_storage_path
-        storage_path = primary_external_storage_path()
-        DATA_DIR = Path(storage_path) / 'sannaeeum'
+        try:
+            from android.storage import primary_external_storage_path
+            storage_path = primary_external_storage_path()
+            DATA_DIR = Path(storage_path) / 'sannaeeum'
+        except:
+            DATA_DIR = Path('/sdcard/sannaeeum')
 else:
     DATA_DIR = Path.cwd() / 'data'
 
@@ -110,7 +116,7 @@ def get_font_name():
     return FONT_NAME if KOREAN_FONT_AVAILABLE else None
 
 # ============================================================
-# 색상 정의
+# 색상 정의 (완전히 동일 유지)
 # ============================================================
 COLORS = {
     'primary': '#8B5FBF',
@@ -157,12 +163,276 @@ def hex_to_rgb(hex_color, alpha=1.0):
     return (1, 1, 1, 1)
 
 # ============================================================
-# 한글 컨텍스트 메뉴를 지원하는 TextInput 클래스 (pyjnius 사용)
+# Clock 이벤트 관리자 (메모리 누수 방지)
 # ============================================================
+class ClockManager:
+    """Clock 이벤트를 중앙에서 관리하는 매니저 클래스"""
+    _instance = None
+    _events: List[Any] = []
+    
+    def __new__(cls):
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
+    
+    @classmethod
+    def schedule_once(cls, callback: Callable, timeout: float = 0) -> Any:
+        """단일 실행 이벤트 예약"""
+        def wrapped_callback(dt):
+            try:
+                callback(dt)
+            except Exception as e:
+                Logger.error(f"Clock 콜백 오류: {e}")
+        
+        event = Clock.schedule_once(wrapped_callback, timeout)
+        cls._events.append(event)
+        return event
+    
+    @classmethod
+    def cancel_event(cls, event: Any) -> None:
+        """특정 이벤트 취소"""
+        if event in cls._events:
+            try:
+                event.cancel()
+                cls._events.remove(event)
+            except:
+                pass
+    
+    @classmethod
+    def cancel_all(cls) -> None:
+        """모든 예약된 이벤트 취소"""
+        for event in cls._events[:]:
+            try:
+                event.cancel()
+            except:
+                pass
+        cls._events.clear()
 
+# ============================================================
+# 검색 파서 (OR, AND, NOT 연산 지원)
+# ============================================================
+class SearchParser:
+    """검색어 파서 - OR, AND, NOT 연산 지원"""
+    
+    PRECEDENCE = {'NOT': 3, 'AND': 2, 'OR': 1}
+    
+    @classmethod
+    def tokenize(cls, query: str) -> List[str]:
+        """검색어를 토큰으로 분리"""
+        if not query or not query.strip():
+            return []
+        
+        tokens = []
+        i = 0
+        length = len(query)
+        
+        while i < length:
+            if query[i].isspace():
+                i += 1
+                continue
+            
+            if query[i] == '(':
+                tokens.append('(')
+                i += 1
+                continue
+            elif query[i] == ')':
+                tokens.append(')')
+                i += 1
+                continue
+            
+            upper_query = query[i:].upper()
+            if upper_query.startswith('OR'):
+                tokens.append('OR')
+                i += 2
+                continue
+            elif upper_query.startswith('AND'):
+                tokens.append('AND')
+                i += 3
+                continue
+            elif upper_query.startswith('NOT'):
+                tokens.append('NOT')
+                i += 3
+                continue
+            
+            if query[i] == '"':
+                j = i + 1
+                while j < length and query[j] != '"':
+                    j += 1
+                if j < length:
+                    tokens.append(query[i+1:j].strip())
+                    i = j + 1
+                else:
+                    tokens.append(query[i+1:].strip())
+                    i = length
+            else:
+                j = i
+                while j < length and not query[j].isspace() and query[j] not in '()':
+                    j += 1
+                tokens.append(query[i:j].strip())
+                i = j
+        
+        return [t for t in tokens if t]
+    
+    @classmethod
+    def infix_to_postfix(cls, tokens: List[str]) -> List[str]:
+        """중위 표기법을 후위 표기법으로 변환"""
+        output = []
+        stack = []
+        
+        for token in tokens:
+            if token in ('OR', 'AND', 'NOT'):
+                while (stack and stack[-1] != '(' and 
+                       cls.PRECEDENCE.get(stack[-1], 0) >= cls.PRECEDENCE.get(token, 0)):
+                    output.append(stack.pop())
+                stack.append(token)
+            elif token == '(':
+                stack.append(token)
+            elif token == ')':
+                while stack and stack[-1] != '(':
+                    output.append(stack.pop())
+                if stack and stack[-1] == '(':
+                    stack.pop()
+            else:
+                output.append(token.lower())
+        
+        while stack:
+            output.append(stack.pop())
+        
+        return output
+    
+    @classmethod
+    def create_search_function(cls, postfix_tokens: List[str]) -> Callable[[Dict[str, str]], bool]:
+        """후위 표기법 토큰을 검색 함수로 변환"""
+        if not postfix_tokens:
+            return lambda link: True
+        
+        stack = []
+        
+        for token in postfix_tokens:
+            if token == 'OR':
+                if len(stack) < 2:
+                    continue
+                right = stack.pop()
+                left = stack.pop()
+                stack.append(lambda link, l=left, r=right: l(link) or r(link))
+            elif token == 'AND':
+                if len(stack) < 2:
+                    continue
+                right = stack.pop()
+                left = stack.pop()
+                stack.append(lambda link, l=left, r=right: l(link) and r(link))
+            elif token == 'NOT':
+                if len(stack) < 1:
+                    continue
+                operand = stack.pop()
+                stack.append(lambda link, op=operand: not op(link))
+            else:
+                search_term = token.lower()
+                stack.append(lambda link, term=search_term: (
+                    term in link.get('title', '').lower() or
+                    term in link.get('description', '').lower() or
+                    term in link.get('url', '').lower()
+                ))
+        
+        return stack[0] if stack else lambda link: False
+    
+    @classmethod
+    def parse(cls, query: str) -> Callable[[Dict[str, str]], bool]:
+        """검색어를 파싱하여 검색 함수 반환"""
+        if not query or not query.strip():
+            return lambda link: True
+        tokens = cls.tokenize(query)
+        postfix = cls.infix_to_postfix(tokens)
+        return cls.create_search_function(postfix)
+
+# ============================================================
+# 키보드 대응 팝업 클래스 (66px 이동)
+# ============================================================
+class KeyboardAwarePopup(Popup):
+    """키보드가 올라올 때 팝업 위치를 66px 조정하는 팝업 클래스"""
+    
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.keyboard_offset = dp(66)
+        self.original_y = None
+        self.is_keyboard_visible = False
+        self.active_input = None
+        self._clock_events = []
+        
+        # 키보드 이벤트 바인딩
+        Window.bind(on_keyboard=self.on_keyboard)
+        Window.bind(on_keyboard_down=self.on_keyboard_down)
+        self.bind(on_open=self.on_popup_open)
+        self.bind(on_dismiss=self.on_popup_dismiss)
+    
+    def on_popup_open(self, instance):
+        """팝업이 열릴 때 원래 위치 저장"""
+        self.original_y = self.y
+    
+    def on_popup_dismiss(self, instance):
+        """팝업 닫힐 때 정리"""
+        Window.unbind(on_keyboard=self.on_keyboard)
+        Window.unbind(on_keyboard_down=self.on_keyboard_down)
+        for event in self._clock_events:
+            ClockManager.cancel_event(event)
+        self._clock_events.clear()
+    
+    def on_keyboard_down(self, window, key, scancode, codepoint, modifier):
+        """키보드가 나타날 때"""
+        if not self.is_keyboard_visible and self.active_input:
+            self.is_keyboard_visible = True
+            self.on_keyboard_show()
+    
+    def on_keyboard(self, window, key, scancode, codepoint, modifier):
+        """키보드 이벤트 처리"""
+        if key == 27 and self.is_keyboard_visible:  # Back button
+            self.is_keyboard_visible = False
+            self.on_keyboard_hide()
+            return True
+        return False
+    
+    def on_keyboard_show(self):
+        """키보드가 나타날 때 팝업을 66px 위로 이동"""
+        if self.original_y is None:
+            self.original_y = self.y
+        
+        new_y = self.original_y + self.keyboard_offset
+        
+        # 화면 상단을 넘어가지 않도록 제한
+        if new_y + self.height > Window.height:
+            new_y = Window.height - self.height - dp(10)
+        
+        # 애니메이션으로 이동
+        anim = Animation(y=new_y, duration=0.2)
+        anim.start(self)
+    
+    def on_keyboard_hide(self):
+        """키보드가 사라질 때 팝업 원위치"""
+        if self.original_y is not None:
+            anim = Animation(y=self.original_y, duration=0.2)
+            anim.start(self)
+    
+    def on_input_focus(self, instance, value):
+        """입력 필드 포커스 이벤트"""
+        self.active_input = instance if value else None
+        
+        if value and not self.is_keyboard_visible:
+            event = Clock.schedule_once(lambda dt: self.check_keyboard(), 0.1)
+            self._clock_events.append(event)
+    
+    def check_keyboard(self):
+        """포커스 후 키보드 상태 확인"""
+        if not self.is_keyboard_visible:
+            self.is_keyboard_visible = True
+            self.on_keyboard_show()
+
+# ============================================================
+# 한글 컨텍스트 메뉴를 지원하는 TextInput 클래스
+# ============================================================
 class KoreanTextInput(TextInput):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
+        self._clock_events = []
         
         if IS_ANDROID:
             self.use_handles = True
@@ -170,7 +440,6 @@ class KoreanTextInput(TextInput):
         
         self.is_long_press = False
         self.long_press_triggered = False
-        self.long_press_clock = None
         self.last_touch_pos = (0, 0)
         self.context_popup = None
     
@@ -180,31 +449,29 @@ class KoreanTextInput(TextInput):
             self.is_long_press = False
             self.long_press_triggered = False
             
-            if self.long_press_clock:
-                self.long_press_clock.cancel()
+            for event in self._clock_events:
+                ClockManager.cancel_event(event)
+            self._clock_events.clear()
             
-            self.long_press_clock = Clock.schedule_once(self.on_long_press, 0.3)
+            event = ClockManager.schedule_once(self.on_long_press, 0.3)
+            self._clock_events.append(event)
             
             if touch.is_double_tap:
-                self.long_press_clock.cancel()
+                ClockManager.cancel_event(event)
+                self._clock_events.remove(event)
                 self.select_all()
-                self.long_press_clock = Clock.schedule_once(self.on_long_press, 0.2)
+                event = ClockManager.schedule_once(self.on_long_press, 0.2)
+                self._clock_events.append(event)
                 return True
         
         return super().on_touch_down(touch)
     
     def on_touch_up(self, touch):
-        if self.collide_point(*touch.pos) and self.long_press_clock:
-            self.long_press_clock.cancel()
-            self.long_press_clock = None
-        
+        if self.collide_point(*touch.pos):
+            for event in self._clock_events:
+                ClockManager.cancel_event(event)
+            self._clock_events.clear()
         return super().on_touch_up(touch)
-    
-    def on_touch_move(self, touch):
-        if self.collide_point(*touch.pos) and self.long_press_clock:
-            self.long_press_clock.cancel()
-            self.long_press_clock = None
-        return super().on_touch_move(touch)
     
     def on_long_press(self, dt):
         if self.long_press_triggered:
@@ -217,7 +484,8 @@ class KoreanTextInput(TextInput):
             self.context_popup.dismiss()
             self.context_popup = None
         
-        Clock.schedule_once(lambda dt: self.show_context_menu(self.last_touch_pos), 0.05)
+        event = Clock.schedule_once(lambda dt: self.show_context_menu(self.last_touch_pos), 0.05)
+        self._clock_events.append(event)
     
     def show_context_menu(self, touch_pos):
         has_selection = bool(self.selection_text)
@@ -279,7 +547,6 @@ class KoreanTextInput(TextInput):
         
         popup_x = touch_pos[0] - content.width / 2
         popup_y = touch_pos[1] - content.height - dp(20)
-        
         popup_x = max(dp(10), min(popup_x, Window.width - content.width - dp(10)))
         
         if popup_y < dp(10):
@@ -287,7 +554,6 @@ class KoreanTextInput(TextInput):
             popup_y = min(popup_y, Window.height - content.height - dp(10))
         
         popup.pos = (popup_x, popup_y)
-        
         popup.bind(on_dismiss=lambda x: setattr(self, 'context_popup', None))
         
         self.context_popup = popup
@@ -297,7 +563,6 @@ class KoreanTextInput(TextInput):
         if IS_ANDROID:
             try:
                 from jnius import autoclass
-                
                 PythonActivity = autoclass('org.kivy.android.PythonActivity')
                 Context = autoclass('android.content.Context')
                 
@@ -312,9 +577,7 @@ class KoreanTextInput(TextInput):
                         if text:
                             self.insert_text(str(text))
                             return True
-            except Exception as e:
-                print(f"pyjnius 클립보드 오류: {e}")
-                
+            except:
                 try:
                     from android import clipboard
                     text = clipboard.get_clipboard_text()
@@ -322,16 +585,14 @@ class KoreanTextInput(TextInput):
                         self.insert_text(text)
                         return True
                 except:
-                    pass
-                
-                try:
-                    from kivy.core.clipboard import Clipboard
-                    text = Clipboard.paste()
-                    if text:
-                        self.insert_text(text)
-                        return True
-                except:
-                    pass
+                    try:
+                        from kivy.core.clipboard import Clipboard
+                        text = Clipboard.paste()
+                        if text:
+                            self.insert_text(text)
+                            return True
+                    except:
+                        pass
         else:
             try:
                 return super().paste()
@@ -344,7 +605,6 @@ class KoreanTextInput(TextInput):
                         return True
                 except:
                     pass
-        
         return False
     
     def cut(self):
@@ -359,7 +619,6 @@ class KoreanTextInput(TextInput):
                     
                     context = PythonActivity.mActivity
                     clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE)
-                    
                     ClipData = autoclass('android.content.ClipData')
                     clip = ClipData.newPlainText('label', text)
                     clipboard.setPrimaryClip(clip)
@@ -390,7 +649,6 @@ class KoreanTextInput(TextInput):
                     
                     context = PythonActivity.mActivity
                     clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE)
-                    
                     ClipData = autoclass('android.content.ClipData')
                     clip = ClipData.newPlainText('label', text)
                     clipboard.setPrimaryClip(clip)
@@ -408,22 +666,8 @@ class KoreanTextInput(TextInput):
         return False
 
 # ============================================================
-# 팝업 클래스 (간소화)
+# 커스텀 위젯 클래스들 (디자인 완전히 동일 유지)
 # ============================================================
-
-class SimplePopup(Popup):
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        self.active_input = None
-    
-    def on_input_focus(self, instance, value):
-        if value:
-            self.active_input = instance
-
-# ============================================================
-# 커스텀 위젯 클래스들
-# ============================================================
-
 class SimplePromotionButton(Button):
     def __init__(self, text, **kwargs):
         super().__init__(**kwargs)
@@ -529,6 +773,7 @@ class LinkCard(BoxLayout):
         self.index = index
         self.delete_callback = delete_callback
         self.edit_callback = edit_callback
+        self._weak_ref = weakref.ref(self)
         
         with self.canvas.before:
             Color(*hex_to_rgb(COLORS['secondary'], 0.8))
@@ -673,9 +918,8 @@ class LinkCard(BoxLayout):
         threading.Thread(target=_open).start()
 
 # ============================================================
-# 메인 앱 클래스 (최종 간소화)
+# 메인 앱 클래스
 # ============================================================
-
 class LinkApp(BoxLayout):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -688,13 +932,19 @@ class LinkApp(BoxLayout):
         self.current_sort = 'title_asc'
         self.search_mode = False
         self.selected_category = 'all'
-        
         self.current_page = 0
         self.page_size = 20
+        self._refresh_trigger = None
+        self.clock_manager = ClockManager()
         
-        Clock.schedule_once(self.load_links, 0.1)
-        Clock.schedule_once(self.setup_ui, 0.2)
-        Clock.schedule_once(self.refresh_link_list, 0.3)
+        self.clock_manager.schedule_once(self.load_links, 0.1)
+        self.clock_manager.schedule_once(self.setup_ui, 0.2)
+        self.clock_manager.schedule_once(self.refresh_link_list, 0.3)
+    
+    def on_stop(self):
+        """앱 종료 시 정리"""
+        self.clock_manager.cancel_all()
+        self.save_links()
     
     def load_links(self, dt=None):
         try:
@@ -961,109 +1211,30 @@ class LinkApp(BoxLayout):
     def update_card_height(self, card):
         self.link_layout.height += card.height
     
-    def parse_search_query(self, query):
-        # ... (검색 파싱 코드는 동일) ...
-        tokens = []
-        current_token = ""
-        i = 0
-        
-        while i < len(query):
-            if query[i:i+2].upper() in ['OR', 'AND']:
-                if current_token:
-                    tokens.append(current_token.strip())
-                    current_token = ""
-                tokens.append(query[i:i+2].upper())
-                i += 2
-            elif query[i:i+3].upper() == 'NOT':
-                if current_token:
-                    tokens.append(current_token.strip())
-                    current_token = ""
-                tokens.append('NOT')
-                i += 3
-            else:
-                current_token += query[i]
-                i += 1
-        
-        if current_token:
-            tokens.append(current_token.strip())
-        
-        output = []
-        stack = []
-        precedence = {'OR': 1, 'AND': 2, 'NOT': 3}
-        
-        for token in tokens:
-            if token.upper() in ['OR', 'AND', 'NOT']:
-                while (stack and stack[-1] != '(' and 
-                       precedence.get(stack[-1], 0) >= precedence.get(token, 0)):
-                    output.append(stack.pop())
-                stack.append(token.upper())
-            elif token == '(':
-                stack.append(token)
-            elif token == ')':
-                while stack and stack[-1] != '(':
-                    output.append(stack.pop())
-                stack.pop()
-            else:
-                output.append(token)
-        
-        while stack:
-            output.append(stack.pop())
-        
-        return output
-    
-    def evaluate_postfix(self, postfix_tokens):
-        stack = []
-        
-        for token in postfix_tokens:
-            if token == 'OR':
-                if len(stack) < 2:
-                    continue
-                right = stack.pop()
-                left = stack.pop()
-                stack.append(lambda link: left(link) or right(link))
-            elif token == 'AND':
-                if len(stack) < 2:
-                    continue
-                right = stack.pop()
-                left = stack.pop()
-                stack.append(lambda link: left(link) and right(link))
-            elif token == 'NOT':
-                if len(stack) < 1:
-                    continue
-                operand = stack.pop()
-                stack.append(lambda link: not operand(link))
-            else:
-                search_term = token.lower()
-                def make_condition(term):
-                    return lambda link: (
-                        term in link['title'].lower() or
-                        term in link['description'].lower() or
-                        term in link['url'].lower()
-                    )
-                stack.append(make_condition(search_term))
-        
-        return stack[0] if stack else lambda link: False
-    
     def search_links(self, instance):
+        """개선된 검색 메서드 (SearchParser 사용)"""
         search_text = self.search_input.text.strip()
         self.current_page = 0
         
         try:
-            if search_text:
-                postfix_tokens = self.parse_search_query(search_text)
-                condition_func = self.evaluate_postfix(postfix_tokens)
-                self.displayed_links = [link for link in self.links if condition_func(link)]
-            else:
-                self.displayed_links = self.links.copy()
+            search_func = SearchParser.parse(search_text)
             
-            self.search_mode = bool(search_text)
+            if not search_text:
+                self.displayed_links = self.links.copy()
+                self.search_mode = False
+            else:
+                self.displayed_links = [link for link in self.links if search_func(link)]
+                self.search_mode = True
+            
             self.sort_links(self.current_sort)
             
         except Exception as e:
             Logger.error(f'검색 중 오류: {e}')
+            # 오류 발생 시 기본 검색으로 폴백
             self.fallback_search(search_text)
     
     def fallback_search(self, search_text):
+        """기본 검색 (폴백)"""
         search_text_lower = search_text.lower()
         self.displayed_links = []
         
@@ -1100,6 +1271,7 @@ class LinkApp(BoxLayout):
         
         self.refresh_link_list()
     
+    @lru_cache(maxsize=128)
     def normalize_url(self, url):
         url = url.strip().lower()
         if url and not url.startswith(('http://', 'https://')):
@@ -1129,7 +1301,6 @@ class LinkApp(BoxLayout):
         content.size_hint = (1, 1)
         
         font_name = get_font_name()
-        
         current_duplicates = len(duplicate_indices)
         
         if current_duplicates >= 2:
@@ -1145,13 +1316,8 @@ class LinkApp(BoxLayout):
             ))
             
             button_layout = BoxLayout(spacing=dp(10), size_hint_y=None, height=dp(50))
-            
             ok_btn = Button(text='확인', background_color=hex_to_rgb(COLORS['primary']), font_name=font_name)
-            
-            def close_popup(btn):
-                popup.dismiss()
-            
-            ok_btn.bind(on_press=close_popup)
+            ok_btn.bind(on_press=lambda x: popup.dismiss())
             button_layout.add_widget(ok_btn)
             content.add_widget(button_layout)
             
@@ -1214,10 +1380,10 @@ class LinkApp(BoxLayout):
             size_hint=(0.8, 0.5),
             auto_dismiss=False
         )
-        
         popup.open()
     
     def show_add_link_popup(self, instance):
+        """새 링크 추가 팝업 (KeyboardAwarePopup 사용)"""
         font_name = get_font_name()
         
         content = BoxLayout(
@@ -1228,7 +1394,6 @@ class LinkApp(BoxLayout):
             height=dp(382)
         )
         
-        # 녹색줄
         green_line = BoxLayout(size_hint_y=None, height=dp(5))
         with green_line.canvas.before:
             Color(*hex_to_rgb(COLORS['green']))
@@ -1237,7 +1402,6 @@ class LinkApp(BoxLayout):
         green_line.bind(size=lambda i, s: setattr(i.rect, 'size', s))
         content.add_widget(green_line)
         
-        # 제목
         title_label = Label(
             text='새 링크 추가',
             size_hint_y=None,
@@ -1332,7 +1496,7 @@ class LinkApp(BoxLayout):
         save_btn.bind(on_press=save_link)
         cancel_btn.bind(on_press=close_popup)
         
-        popup = SimplePopup(
+        popup = KeyboardAwarePopup(
             title='',
             content=content,
             size_hint=(None, None),
@@ -1341,15 +1505,15 @@ class LinkApp(BoxLayout):
             auto_dismiss=False
         )
         
-        popup.active_input = None
         popup.on_input_focus = self.on_input_focus
         
         popup.open()
         Clock.schedule_once(lambda dt: setattr(self.title_input, 'focus', True), 0.2)
     
     def on_input_focus(self, instance, value):
-        for child in self.children:
-            if isinstance(child, SimplePopup):
+        """입력 필드 포커스 이벤트 처리"""
+        for child in self.walk():
+            if isinstance(child, KeyboardAwarePopup):
                 child.on_input_focus(instance, value)
                 break
     
@@ -1407,6 +1571,7 @@ class LinkApp(BoxLayout):
         popup.dismiss()
     
     def edit_link(self, index):
+        """링크 수정 팝업 (KeyboardAwarePopup 사용)"""
         if index < 0 or index >= len(self.links):
             return
         
@@ -1421,7 +1586,6 @@ class LinkApp(BoxLayout):
             height=dp(382)
         )
         
-        # 녹색줄
         green_line = BoxLayout(size_hint_y=None, height=dp(5))
         with green_line.canvas.before:
             Color(*hex_to_rgb(COLORS['green']))
@@ -1430,7 +1594,6 @@ class LinkApp(BoxLayout):
         green_line.bind(size=lambda i, s: setattr(i.rect, 'size', s))
         content.add_widget(green_line)
         
-        # 제목
         title_label = Label(
             text='기존 링크 수정',
             size_hint_y=None,
@@ -1586,7 +1749,7 @@ class LinkApp(BoxLayout):
         save_btn.bind(on_press=save_edit)
         cancel_btn.bind(on_press=cancel_edit)
         
-        popup = SimplePopup(
+        popup = KeyboardAwarePopup(
             title='',
             content=content,
             size_hint=(None, None),
@@ -1595,18 +1758,15 @@ class LinkApp(BoxLayout):
             auto_dismiss=False
         )
         
-        popup.active_input = None
         popup.on_input_focus = self.on_input_focus
         
         popup.open()
         Clock.schedule_once(lambda dt: setattr(title_input, 'focus', True), 0.2)
     
     def show_edit_duplicate_popup(self, title, description, url, category, edit_index, duplicate_indices):
-        # ... (코드 동일) ...
         content = BoxLayout(orientation='vertical', spacing=dp(15), padding=dp(20))
         
         font_name = get_font_name()
-        
         current_duplicates = len(duplicate_indices)
         
         if current_duplicates >= 2:
@@ -1621,13 +1781,8 @@ class LinkApp(BoxLayout):
             ))
             
             button_layout = BoxLayout(spacing=dp(10), size_hint_y=None, height=dp(50))
-            
             ok_btn = Button(text='확인', background_color=hex_to_rgb(COLORS['primary']), font_name=font_name)
-            
-            def close_popup(btn):
-                popup.dismiss()
-            
-            ok_btn.bind(on_press=close_popup)
+            ok_btn.bind(on_press=lambda x: popup.dismiss())
             button_layout.add_widget(ok_btn)
             content.add_widget(button_layout)
             
@@ -1693,7 +1848,6 @@ class LinkApp(BoxLayout):
             size_hint=(0.8, 0.5),
             auto_dismiss=False
         )
-        
         popup.open()
     
     def update_link(self, index, title, description, url, category):
@@ -1749,7 +1903,6 @@ class LinkApp(BoxLayout):
             size_hint=(0.7, 0.4),
             auto_dismiss=False
         )
-        
         popup.open()
     
     def add_link(self, title, description, url, category):
@@ -1766,14 +1919,13 @@ class LinkApp(BoxLayout):
     def save_links(self):
         try:
             with open(self.data_file, 'w', encoding='utf-8') as f:
-                json.dump(self.links, f, ensure_aliases=False, indent=2)
+                json.dump(self.links, f, ensure_ascii=False, indent=2)
         except Exception as e:
             Logger.error(f'링크 저장 실패: {e}')
 
 # ============================================================
 # 앱 실행
 # ============================================================
-
 class SannaeeumLinkApp(App):
     def build(self):
         Window.clearcolor = hex_to_rgb(COLORS['background'])
@@ -1789,6 +1941,12 @@ class SannaeeumLinkApp(App):
             self.stop()
             return True
         return False
+    
+    def on_stop(self):
+        """앱 종료 시 정리"""
+        if hasattr(self, 'root') and self.root:
+            if hasattr(self.root, 'on_stop'):
+                self.root.on_stop()
 
 if __name__ == '__main__':
     print("산내음 링크 앱 시작 중...")
