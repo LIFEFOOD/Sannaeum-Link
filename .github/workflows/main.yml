@@ -46,7 +46,7 @@ jobs:
       run: |
         $HOME/android-sdk/cmdline-tools/latest/bin/sdkmanager "platform-tools" "platforms;android-33" "build-tools;33.0.2" > /dev/null 2>&1
 
-    # ===== 추가: 키스토어 복원 =====
+    # 키스토어 복원
     - name: Decode Keystore
       env:
         KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
@@ -54,7 +54,7 @@ jobs:
         echo "$KEYSTORE_BASE64" | base64 --decode > sannaeeum.keystore
         chmod 600 sannaeeum.keystore
 
-    # ===== 수정: 릴리스 빌드 + 비밀번호 전달 =====
+    # APK 릴리스 빌드
     - name: Build with buildozer (release)
       env:
         KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
@@ -62,19 +62,18 @@ jobs:
       run: |
         buildozer android release
 
-    # ===== 추가: APK 파일 찾기 (선택사항) =====
+    # APK 파일 확인
     - name: Find APK files
       if: always()
       run: |
         echo "=== Searching for APK files ==="
         find . -name "*.apk" -type f || echo "No APK files found"
 
-    # ===== 수정: 업로드 경로 확장 =====
+    # APK 아티팩트 업로드
     - name: Upload APK artifact
       uses: actions/upload-artifact@v4
       with:
         name: sannaeeum-link-apk
         path: |
-          bin/*.apk
           **/*.apk
         if-no-files-found: error
