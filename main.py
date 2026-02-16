@@ -7,20 +7,20 @@ from pathlib import Path
 import sys
 import io
 
-# Kivy 설정 - 로딩 메시지 제거를 위해 추가
+# Kivy 설정
 from kivy.config import Config
 Config.set('graphics', 'width', '400')
 Config.set('graphics', 'height', '700')
-Config.set('graphics', 'resizable', False)  # 크기 고정
-Config.set('kivy', 'show_loadingscreen', '0')  # 로딩 화면 비활성화
-Config.set('kivy', 'loading_image', '')  # 로딩 이미지 제거
+Config.set('graphics', 'resizable', False)
+Config.set('kivy', 'show_loadingscreen', '0')
+Config.set('kivy', 'loading_image', '')
 
-# 한글 인코딩 설정 - 오류 무시
+# 한글 인코딩 설정
 try:
     sys.stdout = io.TextIOWrapper(sys.stdout.detach(), encoding='utf-8')
     sys.stderr = io.TextIOWrapper(sys.stderr.detach(), encoding='utf-8')
 except:
-    pass  # 컴퓨터 IDLE 등에서는 무시
+    pass
 
 # 나머지 임포트
 import kivy
@@ -36,7 +36,6 @@ from kivy.uix.togglebutton import ToggleButton
 from kivy.core.window import Window
 from kivy.graphics import Color, Rectangle, RoundedRectangle
 from kivy.metrics import dp
-from kivy.animation import Animation
 from kivy.clock import Clock
 from kivy.logger import Logger
 from kivy.utils import platform
@@ -44,8 +43,7 @@ from functools import lru_cache
 
 # 안드로이드 네이티브 컨텍스트 메뉴 사용 설정
 if platform == 'android':
-    # 중요: 키보드가 올라와도 팝업이 이동하지 않도록 'pan' 대신 'below_target' 사용
-    Window.softinput_mode = 'below_target'  # 키보드가 올라와도 팝업 위치 고정
+    Window.softinput_mode = 'below_target'
 
 # Kivy 한글 폰트 설정
 from kivy.core.text import LabelBase
@@ -60,20 +58,15 @@ if IS_ANDROID:
         from android.storage import app_storage_path
         from android.permissions import request_permissions, Permission
         
-        # 권한 요청
         request_permissions([Permission.WRITE_EXTERNAL_STORAGE, Permission.READ_EXTERNAL_STORAGE])
-        
-        # 앱 전용 저장소 사용 (안드로이드 11+ 호환성)
         DATA_DIR = Path(app_storage_path()) / 'data'
     except:
-        # 폴백: 외부 저장소
         from android.storage import primary_external_storage_path
         storage_path = primary_external_storage_path()
         DATA_DIR = Path(storage_path) / 'sannaeeum'
 else:
     DATA_DIR = Path.cwd() / 'data'
 
-# 데이터 디렉토리 생성
 DATA_DIR.mkdir(exist_ok=True, parents=True)
 
 # ============================================================
@@ -83,7 +76,6 @@ FONT_NAME = 'MaruBuri'
 FONT_PATH = 'res/fonts/MaruBuri-Bold.ttf'
 KOREAN_FONT_AVAILABLE = False
 
-# 폰트 등록 시도
 try:
     if os.path.exists(FONT_PATH):
         font_dir = os.path.dirname(FONT_PATH)
@@ -93,9 +85,7 @@ try:
         font_file = os.path.basename(FONT_PATH)
         LabelBase.register(name=FONT_NAME, fn_regular=font_file)
         KOREAN_FONT_AVAILABLE = True
-        print(f"✅ 마루부리 폰트 등록 성공: {FONT_PATH}")
     else:
-        print(f"⚠️ 마루부리 폰트를 찾을 수 없습니다: {FONT_PATH}")
         
         if IS_ANDROID:
             system_fonts = [
@@ -108,14 +98,12 @@ try:
                     resource_add_path(os.path.dirname(sys_font))
                     LabelBase.register(name=FONT_NAME, fn_regular=os.path.basename(sys_font))
                     KOREAN_FONT_AVAILABLE = True
-                    print(f"✅ 시스템 폰트로 대체: {sys_font}")
+
                     break
 except Exception as e:
-    print(f"⚠️ 폰트 등록 실패: {e}")
     KOREAN_FONT_AVAILABLE = False
 
 def get_font_name():
-    """사용 가능한 폰트 이름 반환"""
     return FONT_NAME if KOREAN_FONT_AVAILABLE else None
 
 # ============================================================
@@ -142,7 +130,6 @@ COLORS = {
     'description_text': '#2D1B4E'
 }
 
-# 분류 카테고리 정의
 CATEGORIES = {
     '0': '분류안함',
     '1': '교육',
@@ -158,7 +145,6 @@ CATEGORIES = {
 }
 
 def hex_to_rgb(hex_color, alpha=1.0):
-    """16진수 색상을 RGB 튜플로 변환"""
     hex_color = hex_color.lstrip('#')
     if len(hex_color) == 6:
         r = int(hex_color[0:2], 16) / 255.0
@@ -167,106 +153,72 @@ def hex_to_rgb(hex_color, alpha=1.0):
         return (r, g, b, alpha)
     return (1, 1, 1, 1)
 
-
 # ============================================================
-# 수정 1: 한글 컨텍스트 메뉴를 지원하는 TextInput 클래스 (안드로이드 최적화)
+# 한글 컨텍스트 메뉴를 지원하는 TextInput 클래스 (pyjnius 사용)
 # ============================================================
 
 class KoreanTextInput(TextInput):
-    """한글 컨텍스트 메뉴를 지원하는 TextInput - 안드로이드 롱프레스 강제 활성화"""
-    
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         
-        # 중요: 안드로이드에서 롱프레스 강제 활성화
         if IS_ANDROID:
             self.use_handles = True
-            # 롱프레스 시간을 짧게 설정 (0.3초)
             self.long_press_time = 0.3
         
-        # 롱프레스 감지 변수
         self.is_long_press = False
         self.long_press_triggered = False
         self.long_press_clock = None
         self.last_touch_pos = (0, 0)
-        self.touch_down_time = 0
-        
-        # 컨텍스트 메뉴 참조
         self.context_popup = None
     
     def on_touch_down(self, touch):
         if self.collide_point(*touch.pos):
-            # 터치 정보 저장
             self.last_touch_pos = touch.pos
-            self.touch_down_time = touch.time_start
             self.is_long_press = False
             self.long_press_triggered = False
             
-            # 기존 타이머 취소
             if self.long_press_clock:
                 self.long_press_clock.cancel()
             
-            # 롱프레스 타이머 시작 (0.3초)
-            self.long_press_clock = Clock.schedule_once(
-                self.on_long_press, 0.3
-            )
+            self.long_press_clock = Clock.schedule_once(self.on_long_press, 0.3)
             
-            # 더블탭으로 전체선택
             if touch.is_double_tap:
                 self.long_press_clock.cancel()
                 self.select_all()
-                # 전체선택 후 메뉴 표시를 위해 롱프레스 타이머 다시 시작
-                self.long_press_clock = Clock.schedule_once(
-                    self.on_long_press, 0.2
-                )
+                self.long_press_clock = Clock.schedule_once(self.on_long_press, 0.2)
                 return True
         
         return super().on_touch_down(touch)
     
     def on_touch_up(self, touch):
-        if self.collide_point(*touch.pos):
-            # 롱프레스 타이머 취소
-            if self.long_press_clock:
-                self.long_press_clock.cancel()
-                self.long_press_clock = None
-            
-            # 롱프레스가 아니고, 짧은 터치면 포커스
-            if not self.is_long_press and not self.long_press_triggered:
-                # 기본 동작 (포커스)
-                pass
+        if self.collide_point(*touch.pos) and self.long_press_clock:
+            self.long_press_clock.cancel()
+            self.long_press_clock = None
         
         return super().on_touch_up(touch)
     
     def on_touch_move(self, touch):
-        if self.collide_point(*touch.pos):
-            # 움직임이 있으면 롱프레스 취소
-            if self.long_press_clock:
-                self.long_press_clock.cancel()
-                self.long_press_clock = None
+        if self.collide_point(*touch.pos) and self.long_press_clock:
+            self.long_press_clock.cancel()
+            self.long_press_clock = None
         return super().on_touch_move(touch)
     
     def on_long_press(self, dt):
-        """롱프레스 발생 - 컨텍스트 메뉴 표시"""
         if self.long_press_triggered:
             return
         
         self.long_press_triggered = True
         self.is_long_press = True
         
-        # 기존 팝업 닫기
         if self.context_popup:
             self.context_popup.dismiss()
             self.context_popup = None
         
-        # 약간 지연시켜 메뉴 표시
         Clock.schedule_once(lambda dt: self.show_context_menu(self.last_touch_pos), 0.05)
     
     def show_context_menu(self, touch_pos):
-        """컨텍스트 메뉴 표시"""
-        # 선택된 텍스트 확인
         has_selection = bool(self.selection_text)
         
-        # 메뉴 아이템
         menu_items = [
             ('잘라내기', self.cut, has_selection),
             ('복사', self.copy, has_selection),
@@ -274,7 +226,6 @@ class KoreanTextInput(TextInput):
             ('전체선택', self.select_all, True)
         ]
         
-        # 가로 레이아웃
         content = BoxLayout(
             orientation='horizontal',
             spacing=dp(5),
@@ -282,7 +233,6 @@ class KoreanTextInput(TextInput):
             padding=[dp(10), dp(5), dp(10), dp(5)]
         )
         
-        # 버튼 생성
         for text, callback, enabled in menu_items:
             btn = Button(
                 text=text,
@@ -297,13 +247,10 @@ class KoreanTextInput(TextInput):
                 disabled=not enabled
             )
             
-            # 콜백 래핑
             def make_callback(cb):
                 def wrapped(instance):
                     if not instance.disabled:
-                        # 콜백 실행
                         result = cb()
-                        # 팝업 닫기
                         if self.context_popup:
                             self.context_popup.dismiss()
                             self.context_popup = None
@@ -313,11 +260,9 @@ class KoreanTextInput(TextInput):
             btn.bind(on_press=make_callback(callback))
             content.add_widget(btn)
         
-        # 크기 계산
         content.width = len(menu_items) * (dp(90) + dp(5)) + dp(20)
         content.height = dp(60)
         
-        # 팝업 생성
         popup = Popup(
             title='',
             content=content,
@@ -329,11 +274,9 @@ class KoreanTextInput(TextInput):
             border=(0, 0, 0, 0)
         )
         
-        # 위치 계산 - 터치 위치 위에 표시
         popup_x = touch_pos[0] - content.width / 2
         popup_y = touch_pos[1] - content.height - dp(20)
         
-        # 화면 경계 처리
         popup_x = max(dp(10), min(popup_x, Window.width - content.width - dp(10)))
         
         if popup_y < dp(10):
@@ -342,45 +285,33 @@ class KoreanTextInput(TextInput):
         
         popup.pos = (popup_x, popup_y)
         
-        # 팝업 닫힘 이벤트
         popup.bind(on_dismiss=lambda x: setattr(self, 'context_popup', None))
         
         self.context_popup = popup
         popup.open()
     
-    # ===== 수정된 paste 메소드 (pyjnius 사용) =====
     def paste(self):
-        """붙여넣기 - 안드로이드 네이티브 클립보드 직접 접근 (pyjnius)"""
         if IS_ANDROID:
             try:
-                # pyjnius로 안드로이드 클립보드 직접 접근
                 from jnius import autoclass
                 
-                # 안드로이드 클래스 로드
                 PythonActivity = autoclass('org.kivy.android.PythonActivity')
                 Context = autoclass('android.content.Context')
                 
-                # 현재 액티비티 컨텍스트 가져오기
                 context = PythonActivity.mActivity
-                
-                # 클립보드 서비스 가져오기
                 clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE)
                 
-                # 클립보드에 내용이 있는지 확인
                 if clipboard.hasPrimaryClip():
                     clip = clipboard.getPrimaryClip()
                     if clip and clip.getItemCount() > 0:
-                        # 첫 번째 아이템의 텍스트 가져오기
                         item = clip.getItemAt(0)
                         text = item.getText()
                         if text:
-                            # 텍스트를 문자열로 변환하여 삽입
                             self.insert_text(str(text))
                             return True
             except Exception as e:
                 print(f"pyjnius 클립보드 오류: {e}")
                 
-                # 폴백 1: android.clipboard 사용
                 try:
                     from android import clipboard
                     text = clipboard.get_clipboard_text()
@@ -390,7 +321,6 @@ class KoreanTextInput(TextInput):
                 except:
                     pass
                 
-                # 폴백 2: Kivy Clipboard 사용
                 try:
                     from kivy.core.clipboard import Clipboard
                     text = Clipboard.paste()
@@ -400,7 +330,6 @@ class KoreanTextInput(TextInput):
                 except:
                     pass
         else:
-            # PC 환경에서는 기본 붙여넣기 사용
             try:
                 return super().paste()
             except:
@@ -416,12 +345,9 @@ class KoreanTextInput(TextInput):
         return False
     
     def cut(self):
-        """잘라내기"""
         if self.selection_text:
-            # 선택된 텍스트 저장
             text = self.selection_text
             
-            # 클립보드에 복사
             if IS_ANDROID:
                 try:
                     from jnius import autoclass
@@ -431,7 +357,6 @@ class KoreanTextInput(TextInput):
                     context = PythonActivity.mActivity
                     clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE)
                     
-                    # 클립보드에 텍스트 설정
                     ClipData = autoclass('android.content.ClipData')
                     clip = ClipData.newPlainText('label', text)
                     clipboard.setPrimaryClip(clip)
@@ -446,13 +371,11 @@ class KoreanTextInput(TextInput):
                 from kivy.core.clipboard import Clipboard
                 Clipboard.copy(text)
             
-            # 선택된 텍스트 삭제
             self.delete_selection()
             return True
         return False
     
     def copy(self):
-        """복사하기"""
         if self.selection_text:
             text = self.selection_text
             
@@ -482,79 +405,20 @@ class KoreanTextInput(TextInput):
         return False
 
 # ============================================================
-# 수정 2: 키보드에 독립적인 팝업 클래스
+# 팝업 클래스 (간소화)
 # ============================================================
 
-class FixedPositionPopup(Popup):
-    """키보드가 나타나도 위치가 고정되는 팝업"""
+class SimplePopup(Popup):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.active_input = None
-        self.content_scroll = None
-        self.original_y = None
-        
-        # 팝업 위치 저장
-        Clock.schedule_once(self.save_position, 0.1)
-        
-        # 키보드 높이 변경 이벤트 바인딩
-        Window.bind(on_keyboard_height=self.on_keyboard_height)
-    
-    def save_position(self, dt):
-        """팝업의 원래 위치 저장"""
-        self.original_y = self.y
-    
-    def on_keyboard_height(self, window, height):
-        """키보드 높이 변경 시 호출 - 팝업 위치 유지"""
-        if self.original_y is not None:
-            # 키보드가 올라와도 팝업 위치 고정
-            self.y = self.original_y
-        
-        # 활성화된 입력창이 있으면 스크롤 처리
-        if self.content_scroll and self.active_input and height > 0:
-            # 약간 지연시켜 스크롤 (위치는 고정)
-            Clock.schedule_once(lambda dt: self.scroll_to_active_input(), 0.1)
-    
-    def scroll_to_active_input(self):
-        """활성화된 입력창으로 스크롤 (팝업 위치는 고정)"""
-        if not self.content_scroll or not self.active_input:
-            return
-        
-        # 입력창이 보이도록 스크롤만 조정 (팝업 위치는 변경하지 않음)
-        # ScrollView의 자식 위젯 높이 계산
-        scroll_view_height = self.content_scroll.height
-        content_height = self.content_scroll.children[0].height if self.content_scroll.children else 0
-        
-        if content_height > scroll_view_height:
-            # 입력창의 상대적 위치 계산
-            input_y_in_scroll = self.active_input.y
-            input_height = self.active_input.height
-            
-            # 입력창이 화면에 보이도록 스크롤 위치 계산
-            # 키보드 높이를 고려하여 입력창이 가려지지 않도록
-            target_scroll_y = 1.0 - (input_y_in_scroll / (content_height - scroll_view_height))
-            
-            # 키보드 높이를 고려한 추가 조정
-            if hasattr(Window, 'keyboard_height') and Window.keyboard_height > 0:
-                # 키보드 높이만큼 입력창이 위로 보이도록 조정
-                visible_ratio = 1.0 - (Window.keyboard_height / (content_height))
-                target_scroll_y = min(target_scroll_y, visible_ratio)
-            
-            self.content_scroll.scroll_y = max(0, min(1, target_scroll_y))
     
     def on_input_focus(self, instance, value):
-        """입력창 포커스 변경 시 호출"""
         if value:
             self.active_input = instance
-            if Window.keyboard_height > 0:
-                self.scroll_to_active_input()
-    
-    def dismiss(self):
-        """팝업 닫을 때 이벤트 제거"""
-        Window.unbind(on_keyboard_height=self.on_keyboard_height)
-        super().dismiss()
 
 # ============================================================
-# 커스텀 위젯 클래스들 (변경 없음)
+# 커스텀 위젯 클래스들
 # ============================================================
 
 class SimplePromotionButton(Button):
@@ -568,15 +432,7 @@ class SimplePromotionButton(Button):
         self.font_size = dp(20)
         self.bold = True
         self.text = text
-        
-        # 버튼별로 가로길이 비율 설정
-        if text == '산내음청결고춧가루':
-            self.size_hint_x = 0.52  # 52%
-        elif text == '풀밭청결고춧가루':
-            self.size_hint_x = 0.48  # 48%
-        else:
-            self.size_hint_x = 0.5
-            
+        self.size_hint_x = 0.5
         self.padding = [dp(20), dp(10)]
         self.font_name = get_font_name()
 
@@ -587,7 +443,7 @@ class SimpleTitleLayout(BoxLayout):
         self.size_hint_y = None
         self.height = dp(80)
         self.padding = dp(10)
-        self.spacing = dp(15)  # 세로 간격 15로 통일
+        self.spacing = dp(15)
         
         with self.canvas.before:
             Color(*hex_to_rgb(COLORS['primary']))
@@ -671,7 +527,6 @@ class LinkCard(BoxLayout):
         self.delete_callback = delete_callback
         self.edit_callback = edit_callback
         
-        # 카드 전체 배경
         with self.canvas.before:
             Color(*hex_to_rgb(COLORS['secondary'], 0.8))
             self.rect = RoundedRectangle(
@@ -680,12 +535,9 @@ class LinkCard(BoxLayout):
                 pos=self.pos
             )
         
-        # 카드 내용 (좌측)
         content_layout = BoxLayout(orientation='vertical', size_hint=(0.65, 1))
-        
         font_name = get_font_name()
         
-        # 제목
         title_label = Label(
             text=title,
             size_hint_y=None,
@@ -693,13 +545,11 @@ class LinkCard(BoxLayout):
             color=hex_to_rgb(COLORS['text_primary']),
             font_size=dp(18),
             bold=True,
-            text_size=(None, None),
             halign='left',
             font_name=font_name
         )
         title_label.bind(texture_size=title_label.setter('size'))
         
-        # 사이트 설명
         desc_label = Label(
             text=description,
             size_hint_y=None,
@@ -710,11 +560,8 @@ class LinkCard(BoxLayout):
             valign='top',
             font_name=font_name
         )
-        desc_label.bind(
-            texture_size=lambda instance, value: setattr(instance, 'height', max(value[1], dp(40)))
-        )
+        desc_label.bind(texture_size=lambda i, v: setattr(i, 'height', max(v[1], dp(40))))
         
-        # URL
         short_url = url[:50] + "..." if len(url) > 50 else url
         url_label = Label(
             text=short_url,
@@ -722,7 +569,6 @@ class LinkCard(BoxLayout):
             height=dp(20),
             color=hex_to_rgb(COLORS['link_blue']),
             font_size=dp(12),
-            text_size=(None, None),
             halign='left',
             font_name=font_name
         )
@@ -732,10 +578,8 @@ class LinkCard(BoxLayout):
         content_layout.add_widget(desc_label)
         content_layout.add_widget(url_label)
         
-        # 카테고리 및 버튼 레이아웃 (우측)
         right_layout = BoxLayout(orientation='vertical', size_hint=(0.3, 1), spacing=dp(5))
         
-        # 카테고리 표시
         category_label = Label(
             text=CATEGORIES.get(category, '분류안함'),
             size_hint_y=None,
@@ -743,13 +587,11 @@ class LinkCard(BoxLayout):
             color=hex_to_rgb(COLORS['white']),
             font_size=dp(13),
             bold=True,
-            text_size=(None, None),
             halign='center',
             valign='middle',
             font_name=font_name
         )
         
-        # 카테고리 배경
         with category_label.canvas.before:
             Color(*hex_to_rgb(COLORS['primary_dark']))
             self.category_bg = RoundedRectangle(
@@ -760,7 +602,6 @@ class LinkCard(BoxLayout):
         
         category_label.bind(pos=self.update_category_bg, size=self.update_category_bg)
         
-        # 버튼 레이아웃
         button_layout = BoxLayout(orientation='horizontal', size_hint_y=None, height=dp(45), spacing=dp(5))
         
         edit_btn = SmallButton(color_type='warning', text='✎')
@@ -782,9 +623,7 @@ class LinkCard(BoxLayout):
         Clock.schedule_once(self.calculate_height, 0.1)
     
     def calculate_height(self, dt):
-        """내용에 따라 카드 높이를 동적으로 계산"""
         base_height = self.padding[1] + self.padding[3] + self.spacing * 2
-        
         content_height = 0
         if len(self.children) > 0:
             content_layout = self.children[1]
@@ -823,7 +662,6 @@ class LinkCard(BoxLayout):
         return super().on_touch_down(touch)
     
     def open_url_safe(self, url):
-        """비동기로 URL 열기 (UI 블로킹 방지)"""
         def _open():
             try:
                 webbrowser.open(url)
@@ -832,7 +670,7 @@ class LinkCard(BoxLayout):
         threading.Thread(target=_open).start()
 
 # ============================================================
-# 메인 앱 클래스 (수정됨)
+# 메인 앱 클래스 (최종 간소화)
 # ============================================================
 
 class LinkApp(BoxLayout):
@@ -840,7 +678,7 @@ class LinkApp(BoxLayout):
         super().__init__(**kwargs)
         self.orientation = 'vertical'
         self.padding = dp(15)
-        self.spacing = dp(15)  # 모든 세로 간격 15로 통일
+        self.spacing = dp(15)
         self.links = []
         self.displayed_links = []
         self.data_file = DATA_DIR / 'links.json'
@@ -848,17 +686,14 @@ class LinkApp(BoxLayout):
         self.search_mode = False
         self.selected_category = 'all'
         
-        # 페이징 처리 (메모리 최적화)
         self.current_page = 0
         self.page_size = 20
         
-        # 지연 초기화
         Clock.schedule_once(self.load_links, 0.1)
         Clock.schedule_once(self.setup_ui, 0.2)
         Clock.schedule_once(self.refresh_link_list, 0.3)
     
     def load_links(self, dt=None):
-        """데이터 로드"""
         try:
             if self.data_file.exists():
                 with open(self.data_file, 'r', encoding='utf-8') as f:
@@ -872,7 +707,6 @@ class LinkApp(BoxLayout):
             self.links = []
     
     def setup_ui(self, dt=None):
-        """UI 설정"""
         self.setup_promotion_buttons()
         
         title_layout = SimpleTitleLayout()
@@ -890,7 +724,7 @@ class LinkApp(BoxLayout):
         promotion_layout = BoxLayout(
             size_hint_y=None, 
             height=dp(60),
-            spacing=dp(6),  # 버튼 사이 간격 6으로 설정
+            spacing=dp(6),
             padding=[dp(0), dp(5), dp(0), dp(5)]
         )
         
@@ -906,7 +740,6 @@ class LinkApp(BoxLayout):
         self.add_widget(promotion_layout)
     
     def open_url_safe(self, url):
-        """비동기로 URL 열기"""
         def _open():
             try:
                 webbrowser.open(url)
@@ -917,40 +750,35 @@ class LinkApp(BoxLayout):
     def setup_search_sort_ui(self):
         font_name = get_font_name()
         
-        # 검색/카테고리 줄 - 픽셀 기준으로 재계산
         search_category_layout = BoxLayout(size_hint_y=None, height=dp(50), spacing=dp(6))
         
-        # 검색 입력란 - KoreanTextInput 사용
         self.search_input = KoreanTextInput(
-            hint_text='검색어 (OR, AND, NOT  예: 바람 OR 김)',
-            size_hint=(0.494, 1),  # 183/370 = 0.494
+            hint_text='검색어 (OR, AND, NOT 예: 바람 OR 김)',
+            size_hint=(0.494, 1),
             background_color=hex_to_rgb(COLORS['white']),
             foreground_color=hex_to_rgb(COLORS['text_primary']),
             font_name=font_name
         )
         
-        # 전체포함 버튼
         self.category_btn = Button(
             text='전체포함',
-            size_hint=(0.184, 1),  # 68/370 = 0.184
+            size_hint=(0.184, 1),
             background_color=hex_to_rgb(COLORS['primary_light']),
             font_name=font_name
         )
         self.category_btn.bind(on_press=self.show_category_popup)
         
-        # 검색 버튼
         search_btn = Button(
             text='검색',
-            size_hint=(0.135, 1),  # 50/370 = 0.135
+            size_hint=(0.135, 1),
             background_color=hex_to_rgb(COLORS['primary']),
             font_name=font_name
         )
         search_btn.bind(on_press=self.search_links)
         
-        # 전체 버튼
         clear_btn = Button(
             text='전체',
-            size_hint=(0.135, 1),  # 50/370 = 0.135
+            size_hint=(0.135, 1),
             background_color=hex_to_rgb(COLORS['accent']),
             font_name=font_name
         )
@@ -961,7 +789,6 @@ class LinkApp(BoxLayout):
         search_category_layout.add_widget(search_btn)
         search_category_layout.add_widget(clear_btn)
         
-        # 제목 버튼 줄 - 기존 유지 (모두 25% = 88px, 여백 6px)
         sort_layout = BoxLayout(size_hint_y=None, height=dp(50), spacing=dp(6))
         
         sort_buttons = [
@@ -974,7 +801,7 @@ class LinkApp(BoxLayout):
         for text, sort_type in sort_buttons:
             btn = Button(
                 text=text,
-                size_hint=(0.25, 1),  # 88px (25%)
+                size_hint=(0.25, 1),
                 background_color=hex_to_rgb(COLORS['primary_light']),
                 font_name=font_name
             )
@@ -1059,7 +886,7 @@ class LinkApp(BoxLayout):
         self.link_layout = GridLayout(
             cols=1,
             size_hint_y=None,
-            spacing=dp(15),  # 링크 카드 사이 간격 15 유지
+            spacing=dp(15),
             padding=dp(10)
         )
         self.link_layout.bind(minimum_height=self.link_layout.setter('height'))
@@ -1068,7 +895,6 @@ class LinkApp(BoxLayout):
         self.add_widget(self.scroll)
     
     def refresh_link_list(self, dt=None):
-        """링크 목록 새로고침 (페이징 적용)"""
         font_name = get_font_name()
         
         self.link_layout.clear_widgets()
@@ -1093,7 +919,6 @@ class LinkApp(BoxLayout):
             self.link_layout.add_widget(empty_label)
             self.link_layout.height += dp(100)
         else:
-            # 페이징 처리
             start = self.current_page * self.page_size
             end = min(start + self.page_size, len(links_to_display))
             page_links = links_to_display[start:end]
@@ -1112,7 +937,6 @@ class LinkApp(BoxLayout):
                 self.link_layout.add_widget(card)
                 Clock.schedule_once(lambda dt, c=card: self.update_card_height(c), 0.2)
             
-            # 더 보기 버튼 (링크가 더 있을 경우)
             if end < len(links_to_display):
                 more_btn = Button(
                     text='더 보기...',
@@ -1128,15 +952,14 @@ class LinkApp(BoxLayout):
         Clock.schedule_once(lambda dt: setattr(self.scroll, 'scroll_y', 1), 0.1)
     
     def load_more(self, instance):
-        """더 많은 링크 로드"""
         self.current_page += 1
         self.refresh_link_list()
     
     def update_card_height(self, card):
-        """카드 높이를 링크 레이아웃에 반영"""
         self.link_layout.height += card.height
     
     def parse_search_query(self, query):
+        # ... (검색 파싱 코드는 동일) ...
         tokens = []
         current_token = ""
         i = 0
@@ -1220,7 +1043,7 @@ class LinkApp(BoxLayout):
     
     def search_links(self, instance):
         search_text = self.search_input.text.strip()
-        self.current_page = 0  # 검색 시 첫 페이지부터
+        self.current_page = 0
         
         try:
             if search_text:
@@ -1261,7 +1084,7 @@ class LinkApp(BoxLayout):
     def sort_links(self, sort_type):
         self.current_sort = sort_type
         links_to_sort = self.displayed_links if self.search_mode else self.links
-        self.current_page = 0  # 정렬 시 첫 페이지부터
+        self.current_page = 0
         
         if sort_type == 'title_asc':
             links_to_sort.sort(key=lambda x: x['title'].lower())
@@ -1275,14 +1098,12 @@ class LinkApp(BoxLayout):
         self.refresh_link_list()
     
     def normalize_url(self, url):
-        """URL을 정규화하고 소문자로 변환"""
         url = url.strip().lower()
         if url and not url.startswith(('http://', 'https://')):
             url = f'https://{url}'
         return url
     
     def check_duplicate_url(self, url):
-        """URL 중복 체크 - 대소문자 구분 없이 비교"""
         normalized_url = self.normalize_url(url)
         duplicate_indices = []
         for i, link in enumerate(self.links):
@@ -1292,7 +1113,6 @@ class LinkApp(BoxLayout):
         return duplicate_indices
     
     def count_duplicate_urls(self, url):
-        """동일한 URL의 개수를 반환"""
         normalized_url = self.normalize_url(url)
         count = 0
         for link in self.links:
@@ -1302,7 +1122,6 @@ class LinkApp(BoxLayout):
         return count
     
     def show_duplicate_popup(self, title, description, url, category, duplicate_indices):
-        """중복 URL 처리 팝업"""
         content = BoxLayout(orientation='vertical', spacing=dp(15), padding=dp(20))
         content.size_hint = (1, 1)
         
@@ -1398,12 +1217,38 @@ class LinkApp(BoxLayout):
     def show_add_link_popup(self, instance):
         font_name = get_font_name()
         
-        # 스크롤 가능한 컨텐츠 레이아웃
-        scroll_content = ScrollView(do_scroll_x=False)
-        content = BoxLayout(orientation='vertical', spacing=dp(8), padding=[dp(15), dp(10), dp(15), dp(10)], size_hint_y=None)
-        content.bind(minimum_height=content.setter('height'))
+        content = BoxLayout(
+            orientation='vertical',
+            spacing=dp(8),
+            padding=[dp(15), dp(15), dp(15), dp(10)],
+            size_hint_y=None,
+            height=dp(382)
+        )
         
-        # 제목 입력 - KoreanTextInput 사용
+        # 녹색줄
+        green_line = BoxLayout(size_hint_y=None, height=dp(5))
+        with green_line.canvas.before:
+            Color(*hex_to_rgb(COLORS['green']))
+            green_line.rect = Rectangle(size=green_line.size, pos=green_line.pos)
+        green_line.bind(pos=lambda i, p: setattr(i.rect, 'pos', p))
+        green_line.bind(size=lambda i, s: setattr(i.rect, 'size', s))
+        content.add_widget(green_line)
+        
+        # 제목
+        title_label = Label(
+            text='새 링크 추가',
+            size_hint_y=None,
+            height=dp(50),
+            color=hex_to_rgb(COLORS['white']),
+            font_size=dp(20),
+            bold=True,
+            valign='middle',
+            halign='center',
+            font_name=font_name
+        )
+        title_label.bind(size=title_label.setter('text_size'))
+        content.add_widget(title_label)
+        
         self.title_input = KoreanTextInput(
             hint_text='사이트 제목을 입력하세요',
             size_hint_y=None,
@@ -1413,7 +1258,6 @@ class LinkApp(BoxLayout):
         self.title_input.bind(focus=self.on_input_focus)
         content.add_widget(self.title_input)
         
-        # 설명 입력 - KoreanTextInput 사용
         self.desc_input = KoreanTextInput(
             hint_text='사이트 설명을 입력하세요\n(여러 줄로 입력 가능)',
             size_hint_y=None,
@@ -1424,7 +1268,6 @@ class LinkApp(BoxLayout):
         self.desc_input.bind(focus=self.on_input_focus)
         content.add_widget(self.desc_input)
         
-        # URL 입력 - KoreanTextInput 사용
         self.url_input = KoreanTextInput(
             hint_text='https://example.com',
             size_hint_y=None,
@@ -1434,8 +1277,7 @@ class LinkApp(BoxLayout):
         self.url_input.bind(focus=self.on_input_focus)
         content.add_widget(self.url_input)
         
-        # 버튼과 카테고리 선택 레이아웃
-        button_category_layout = BoxLayout(spacing=dp(8), size_hint_y=None, height=dp(48))
+        button_layout = BoxLayout(spacing=dp(8), size_hint_y=None, height=dp(48))
         
         cancel_btn = Button(
             text='취소', 
@@ -1459,10 +1301,10 @@ class LinkApp(BoxLayout):
             font_name=font_name
         )
         
-        button_category_layout.add_widget(cancel_btn)
-        button_category_layout.add_widget(self.category_select_btn)
-        button_category_layout.add_widget(save_btn)
-        content.add_widget(button_category_layout)
+        button_layout.add_widget(cancel_btn)
+        button_layout.add_widget(self.category_select_btn)
+        button_layout.add_widget(save_btn)
+        content.add_widget(button_layout)
         
         self.selected_category_id = '0'
         
@@ -1487,29 +1329,24 @@ class LinkApp(BoxLayout):
         save_btn.bind(on_press=save_link)
         cancel_btn.bind(on_press=close_popup)
         
-        scroll_content.add_widget(content)
-        
-        # 수정: FixedPositionPopup 사용
-        popup = FixedPositionPopup(
+        popup = SimplePopup(
             title='',
-            content=scroll_content,
-            size_hint=(0.9, 0.55),
+            content=content,
+            size_hint=(None, None),
+            width=dp(360),
+            height=dp(382),
             auto_dismiss=False
         )
         
-        # 팝업에 스크롤 뷰와 입력창 참조 저장
-        popup.content_scroll = scroll_content
         popup.active_input = None
         popup.on_input_focus = self.on_input_focus
         
         popup.open()
-        Clock.schedule_once(lambda dt: setattr(self.title_input, 'focus', True), 0.1)
+        Clock.schedule_once(lambda dt: setattr(self.title_input, 'focus', True), 0.2)
     
     def on_input_focus(self, instance, value):
-        """입력창 포커스 변경 시 팝업에 알림"""
-        # 현재 열려있는 팝업 찾기
         for child in self.children:
-            if isinstance(child, FixedPositionPopup):
+            if isinstance(child, SimplePopup):
                 child.on_input_focus(instance, value)
                 break
     
@@ -1573,12 +1410,38 @@ class LinkApp(BoxLayout):
         link = self.links[index]
         font_name = get_font_name()
         
-        # 스크롤 가능한 컨텐츠 레이아웃
-        scroll_content = ScrollView(do_scroll_x=False)
-        content = BoxLayout(orientation='vertical', spacing=dp(8), padding=[dp(15), dp(10), dp(15), dp(10)], size_hint_y=None)
-        content.bind(minimum_height=content.setter('height'))
+        content = BoxLayout(
+            orientation='vertical',
+            spacing=dp(8),
+            padding=[dp(15), dp(15), dp(15), dp(10)],
+            size_hint_y=None,
+            height=dp(382)
+        )
         
-        # 제목 입력 - KoreanTextInput 사용
+        # 녹색줄
+        green_line = BoxLayout(size_hint_y=None, height=dp(5))
+        with green_line.canvas.before:
+            Color(*hex_to_rgb(COLORS['green']))
+            green_line.rect = Rectangle(size=green_line.size, pos=green_line.pos)
+        green_line.bind(pos=lambda i, p: setattr(i.rect, 'pos', p))
+        green_line.bind(size=lambda i, s: setattr(i.rect, 'size', s))
+        content.add_widget(green_line)
+        
+        # 제목
+        title_label = Label(
+            text='기존 링크 수정',
+            size_hint_y=None,
+            height=dp(50),
+            color=hex_to_rgb(COLORS['white']),
+            font_size=dp(20),
+            bold=True,
+            valign='middle',
+            halign='center',
+            font_name=font_name
+        )
+        title_label.bind(size=title_label.setter('text_size'))
+        content.add_widget(title_label)
+        
         title_input = KoreanTextInput(
             text=link['title'],
             size_hint_y=None,
@@ -1588,7 +1451,6 @@ class LinkApp(BoxLayout):
         title_input.bind(focus=self.on_input_focus)
         content.add_widget(title_input)
         
-        # 설명 입력 - KoreanTextInput 사용
         desc_input = KoreanTextInput(
             text=link['description'],
             size_hint_y=None,
@@ -1599,7 +1461,6 @@ class LinkApp(BoxLayout):
         desc_input.bind(focus=self.on_input_focus)
         content.add_widget(desc_input)
         
-        # URL 입력 - KoreanTextInput 사용
         url_input = KoreanTextInput(
             text=link['url'],
             size_hint_y=None,
@@ -1609,8 +1470,7 @@ class LinkApp(BoxLayout):
         url_input.bind(focus=self.on_input_focus)
         content.add_widget(url_input)
         
-        # 버튼과 카테고리 선택 레이아웃
-        button_category_layout = BoxLayout(spacing=dp(8), size_hint_y=None, height=dp(48))
+        button_layout = BoxLayout(spacing=dp(8), size_hint_y=None, height=dp(48))
         
         cancel_btn = Button(
             text='취소', 
@@ -1634,10 +1494,10 @@ class LinkApp(BoxLayout):
             font_name=font_name
         )
         
-        button_category_layout.add_widget(cancel_btn)
-        button_category_layout.add_widget(category_select_btn)
-        button_category_layout.add_widget(save_btn)
-        content.add_widget(button_category_layout)
+        button_layout.add_widget(cancel_btn)
+        button_layout.add_widget(category_select_btn)
+        button_layout.add_widget(save_btn)
+        content.add_widget(button_layout)
         
         edit_selected_category = current_category
         
@@ -1723,25 +1583,23 @@ class LinkApp(BoxLayout):
         save_btn.bind(on_press=save_edit)
         cancel_btn.bind(on_press=cancel_edit)
         
-        scroll_content.add_widget(content)
-        
-        # 수정: FixedPositionPopup 사용
-        popup = FixedPositionPopup(
+        popup = SimplePopup(
             title='',
-            content=scroll_content,
-            size_hint=(0.9, 0.55),
+            content=content,
+            size_hint=(None, None),
+            width=dp(360),
+            height=dp(382),
             auto_dismiss=False
         )
         
-        # 팝업에 스크롤 뷰와 입력창 참조 저장
-        popup.content_scroll = scroll_content
         popup.active_input = None
         popup.on_input_focus = self.on_input_focus
         
         popup.open()
-        Clock.schedule_once(lambda dt: setattr(title_input, 'focus', True), 0.1)
+        Clock.schedule_once(lambda dt: setattr(title_input, 'focus', True), 0.2)
     
     def show_edit_duplicate_popup(self, title, description, url, category, edit_index, duplicate_indices):
+        # ... (코드 동일) ...
         content = BoxLayout(orientation='vertical', spacing=dp(15), padding=dp(20))
         
         font_name = get_font_name()
@@ -1756,7 +1614,6 @@ class LinkApp(BoxLayout):
                 size_hint_y=None,
                 height=dp(80),
                 font_name=font_name,
-                text_size=(None, None),
                 halign='center'
             ))
             
@@ -1787,7 +1644,6 @@ class LinkApp(BoxLayout):
             size_hint_y=None,
             height=dp(80),
             font_name=font_name,
-            text_size=(None, None),
             halign='center'
         ))
         
@@ -1860,7 +1716,6 @@ class LinkApp(BoxLayout):
             size_hint_y=None,
             height=dp(60),
             font_name=font_name,
-            text_size=(None, None),
             halign='center'
         ))
         
@@ -1908,7 +1763,7 @@ class LinkApp(BoxLayout):
     def save_links(self):
         try:
             with open(self.data_file, 'w', encoding='utf-8') as f:
-                json.dump(self.links, f, ensure_ascii=False, indent=2)
+                json.dump(self.links, f, ensure_aliases=False, indent=2)
         except Exception as e:
             Logger.error(f'링크 저장 실패: {e}')
 
@@ -1922,21 +1777,17 @@ class SannaeeumLinkApp(App):
         self.title = '산내음 링크'
         self.icon = 'icon.png'
         
-        # 뒤로가기 버튼 바인딩
         Window.bind(on_keyboard=self.on_keyboard)
         
         return LinkApp()
     
     def on_keyboard(self, window, key, scancode, codepoint, modifier):
-        if key == 27:  # 뒤로가기 버튼
+        if key == 27:
             self.stop()
             return True
         return False
 
 if __name__ == '__main__':
-    print("산내음 링크 앱 시작 중...")
-    print(f"마루부리 폰트 사용 가능: {KOREAN_FONT_AVAILABLE}")
-    print(f"데이터 저장 경로: {DATA_DIR}")
     try:
         SannaeeumLinkApp().run()
     except Exception as e:
